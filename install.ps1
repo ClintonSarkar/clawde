@@ -258,7 +258,7 @@ function Check-Existing {
             Write-Host "    2. [U]se existing OpenCode from PATH"
             Write-Host "    3. [C]ancel"
             Write-Host ""
-            $action = Read-Host "  Select [2]"
+            $action = Read-Host "  Select (default: 2)"
             if (-not $action) { $action = "2" }
             switch -Wildcard ($action) {
                 "1" { Write-DebugMsg "User chose install new binary" }
@@ -306,7 +306,7 @@ function Check-Existing {
     Write-Host "    3. [U]se existing OpenCode from PATH"
     Write-Host "    4. [C]ancel"
     Write-Host ""
-    $action = Read-Host "  Select [1]"
+    $action = Read-Host "  Select (default: 1)"
     if (-not $action) { $action = "1" }
 
     switch -Wildcard ($action) {
@@ -567,7 +567,7 @@ function Do-InteractiveConfig {
 
     $valid = $false
     do {
-        $authChoice = Read-Host "  Select [1]"
+        $authChoice = Read-Host "  Select (default: 1)"
         if (-not $authChoice) { $authChoice = "1" }
         switch ($authChoice) {
             "1" { $authMethod = "oauth"; $Script:AuthPending = $true; Write-Host ""; Write-Info "You'll complete Claude authentication later. Run 'clawde auth' after install to log in."; $valid = $true }

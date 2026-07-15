@@ -326,7 +326,7 @@ check_existing() {
       echo "    2. [U]se existing OpenCode from PATH"
       echo "    3. [C]ancel"
       echo ""
-      read -rp "  Select [2]: " action
+      read -rp "  Select (default: 2): " action
       action="${action:-2}"
       case "$action" in
         [Ii]|1)
@@ -381,7 +381,7 @@ check_existing() {
   echo "    3. [U]se existing OpenCode from PATH"
   echo "    4. [C]ancel"
   echo ""
-  read -rp "  Select [1]: " action
+  read -rp "  Select (default: 1): " action
   action="${action:-1}"
 
   case "$action" in
@@ -647,7 +647,7 @@ do_interactive_config() {
   echo "    2. Use existing Claude CLI token"
   echo ""
   while true; do
-    read -rp "  Select [1]: " auth_choice
+    read -rp "  Select (default: 1): " auth_choice
     auth_choice="${auth_choice:-1}"
     case "$auth_choice" in
       1) auth_method="oauth"; AUTH_PENDING=true; echo ""; info "You'll complete Claude authentication later. Run 'clawde auth' after install to log in."; break ;;
