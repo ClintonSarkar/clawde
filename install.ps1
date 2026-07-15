@@ -664,9 +664,17 @@ function Install-Cli {
     Register-Rollback $clawdePs1Path
     Register-Rollback $clawdeCmdPath
 
-    # Create CMD shim that calls the PowerShell script
-    $cmdShim = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0clawde.ps1`" %*"
-    Set-Content -Path $clawdeCmdPath -Value $cmdShim -Encoding ASCII
+    # Download CMD shim from repo
+    $clawdeCmdUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.cmd"
+    try {
+        Invoke-WebRequest -Uri $clawdeCmdUrl -OutFile $clawdeCmdPath -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+    }
+    catch {
+        Write-Warn "Failed to download clawde.cmd: $($_.Exception.Message)"
+        Write-Warn "Creating fallback shim..."
+        $cmdShim = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0clawde.ps1`" %*"
+        Set-Content -Path $clawdeCmdPath -Value $cmdShim -Encoding ASCII
+    }
 
     Set-StepDone "clawde CLI installed"
 }

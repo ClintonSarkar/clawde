@@ -337,6 +337,23 @@ function Self-Update {
         Write-Host "  [WARN] Could not update clawde CLI: $($_.Exception.Message)" -ForegroundColor Yellow
         Write-Host "  You can update manually: irm $updateUrl -o $thisScript" -ForegroundColor Gray
     }
+
+    # Update .cmd shim
+    Write-Host "[INFO] Updating clawde.cmd shim..." -ForegroundColor Cyan
+    $clawdeCmdPath = Join-Path $BinDir "clawde.cmd"
+    try {
+        $cmdUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.cmd"
+        $tmpCmd = Join-Path $env:TEMP "clawde-update.cmd"
+        Invoke-WebRequest -Uri $cmdUrl -OutFile $tmpCmd -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+        Copy-Item $tmpCmd $clawdeCmdPath -Force
+        Remove-Item $tmpCmd -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] clawde.cmd updated" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  [WARN] Could not update clawde.cmd: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  You can update manually: irm $cmdUrl -o $clawdeCmdPath" -ForegroundColor Gray
+        Write-Host "  You can update manually: irm $updateUrl -o $thisScript" -ForegroundColor Gray
+    }
 }
 
 function Cmd-Logs($service, $follow, $lines) {
