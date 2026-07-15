@@ -284,12 +284,16 @@ function Cmd-Update {
         # Strip ANSI escape codes and extract version number (e.g. "ccproxy 0.2.10")
         $verClean = ($ver -replace '\x1b\[[0-9;]*m', '' -replace '\s+', ' ').Trim()
         # Match "ccproxy X.Y.Z" pattern at end of output
-        if ($verClean -match 'ccproxy\s+(\d+\.\d+\.\d+)') {
-            $currentVer = $Matches[1]
-        } elseif ($verClean -match '(\d+\.\d+\.\d+)') {
-            $currentVer = $Matches[1]
+        $verMatch = [regex]::Match($verClean, 'ccproxy\s+(\d+\.\d+\.\d+)')
+        if ($verMatch.Success) {
+            $currentVer = $verMatch.Groups[1].Value
         } else {
-            $currentVer = $verClean
+            $verMatch = [regex]::Match($verClean, '(\d+\.\d+\.\d+)')
+            if ($verMatch.Success) {
+                $currentVer = $verMatch.Groups[1].Value
+            } else {
+                $currentVer = $verClean
+            }
         }
         try {
             $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" -TimeoutSec 15
