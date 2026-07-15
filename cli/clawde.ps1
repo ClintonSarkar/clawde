@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 # clawde.ps1 - unified CLI for managing OpenCode + CCProxy (Windows)
 #
 # Commands:
@@ -258,17 +258,47 @@ function Cmd-Update {
         Write-Host "  [ERROR] opencode not found" -ForegroundColor Red
     }
 
-    Write-Host ""
+Write-Host ""
     Write-Host "[INFO] Updating CCProxy..." -ForegroundColor Cyan
 
-    $uv = Get-Command uv -ErrorAction SilentlyContinue
-    $pipx = Get-Command pipx -ErrorAction SilentlyContinue
-    if ($uv) {
-        & uv tool upgrade "ccproxy-api[all]" 2>&1
-    } elseif ($pipx) {
-        & pipx upgrade "ccproxy-api" 2>&1
+    $ccproxyExe = Find-Binary "ccproxy.exe"
+    if ($ccproxyExe) {
+        $ver = & $ccproxyExe --version 2>&1
+        Write-Host "  Current: $ver"
+        # Check for newer release
+        try {
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" -TimeoutSec 15
+            $latestTag = $release.tag_name
+            $currentVer = ($ver -replace ".*version\s*", "" -replace "\s.*", "").Trim()
+            if ($latestTag -ne "v$currentVer") {
+                Write-Host "  Latest:  $latestTag"
+                Write-Host "  Downloading update..."
+                $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "i686" }
+                $assetName = "ccproxy-${latestTag}-${arch}-pc-windows-msvc.zip"
+                $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+                if ($asset) {
+                    $zipPath = Join-Path $env:TEMP "ccproxy-update.zip"
+                    Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
+                    $binDir = Split-Path $ccproxyExe
+                    Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
+                    $extractedExe = Join-Path $binDir "ccproxy.exe"
+                    if (-not (Test-Path $extractedExe)) {
+                        $found = Get-ChildItem $binDir -Recurse -Filter "ccproxy.exe" | Select-Object -First 1
+                        if ($found) { Move-Item $found.FullName $extractedExe -Force }
+                    }
+                    Remove-Item $zipPath -Force
+                    Write-Host "  [OK] CCProxy updated" -ForegroundColor Green
+                } else {
+                    Write-Host "  [WARN] No binary found for $latestTag" -ForegroundColor Yellow
+                }
+            } else {
+                Write-Host "  Already up to date"
+            }
+        } catch {
+            Write-Host "  [ERROR] Could not check for updates: $_" -ForegroundColor Red
+        }
     } else {
-        Write-Host "  [ERROR] Neither uv nor pipx found" -ForegroundColor Red
+        Write-Host "  [ERROR] ccproxy not found - run installer or clawde update --install" -ForegroundColor Red
     }
 
     Write-Host "`n[OK] Update complete" -ForegroundColor Green

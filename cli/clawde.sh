@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 # clawde.sh - unified CLI for managing OpenCode + CCProxy (Linux/WSL)
 #
 # Commands:
@@ -247,12 +247,53 @@ cmd_update() {
 
   echo ""
   echo "[INFO] Updating CCProxy..."
-  if command -v uv >/dev/null 2>&1; then
-    uv tool upgrade "ccproxy-api[all]"
-  elif command -v pipx >/dev/null 2>&1; then
-    pipx upgrade "ccproxy-api"
+  local ccproxy_bin
+  ccproxy_bin="$(find_binary ccproxy 2>/dev/null || true)"
+  if [[ -n "$ccproxy_bin" && -x "$ccproxy_bin" ]]; then
+    local ver
+    ver="$("$ccproxy_bin" --version 2>/dev/null || echo "unknown")"
+    echo "  Current: $ver"
+    # Check for newer release
+    local release_json latest_tag
+    release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" 2>/dev/null)" || {
+      echo "  [ERROR] Could not check for updates"
+      echo ""
+      echo "[OK] Update complete"
+      return
+    }
+    latest_tag="$(echo "$release_json" | grep "\"tag_name\"" | head -1 | sed -E "s/.*\"([^\"]+)\".*/\1/")"
+    echo "  Latest:  $latest_tag"
+    # Determine platform asset
+    local arch asset_name
+    arch="$(uname -m)"
+    case "$(uname -s):${arch}" in
+      Linux:x86_64)   asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
+      Linux:aarch64)  asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
+      Darwin:x86_64)  asset_name="ccproxy-${latest_tag}-x86_64-apple-darwin.tar.gz" ;;
+      Darwin:arm64|Darwin:aarch64) asset_name="ccproxy-${latest_tag}-aarch64-apple-darwin.tar.gz" ;;
+      *) echo "  [ERROR] Unsupported platform"; echo ""; echo "[OK] Update complete"; return ;;
+    esac
+    local download_url
+    download_url="$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_name}[^\"]*\"" | sed -E "s/.*\"([^\"]+)\".*/\1/" | head -1)"
+    if [[ -z "$download_url" ]]; then
+      echo "  [WARN] No binary found for $latest_tag"
+    else
+      local tmp_archive="/tmp/ccproxy-update.tar.gz"
+      local bin_dir="$(dirname "$ccproxy_bin")"
+      if curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$tmp_archive" 2>/dev/null; then
+        tar -xzf "$tmp_archive" -C "$bin_dir" 2>/dev/null
+        if [[ ! -x "$ccproxy_bin" ]]; then
+          local found="$(find "$bin_dir" -name ccproxy -type f -executable | head -1)"
+          if [[ -n "$found" ]]; then mv "$found" "$ccproxy_bin"; chmod +x "$ccproxy_bin"; fi
+        fi
+        rm -f "$tmp_archive"
+        echo "  [OK] CCProxy updated"
+      else
+        echo "  [ERROR] Download failed"
+      fi
+    fi
   else
-    echo "  [ERROR] Neither uv nor pipx found"
+    echo "  [ERROR] ccproxy not found - run installer first"
   fi
 
   echo ""
