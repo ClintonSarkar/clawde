@@ -389,7 +389,7 @@ function Setup-Path {
 # Install OpenCode
 # ====================================================================
 function Install-OpenCode {
-    Write-Info "[1/5] Installing OpenCode binary..."
+    Write-Info "[1/6] Installing OpenCode binary..."
 
     if ($Script:SkipOpenCode) {
         Write-Info "OpenCode installation skipped (existing installation preserved)"
@@ -507,7 +507,7 @@ function Install-OpenCodeFromSource {
 # Install CCProxy
 # ====================================================================
 function Install-CCProxy {
-    Write-Info "[2/5] Installing CCProxy (Claude Work proxy)..."
+    Write-Info "[2/6] Installing CCProxy (Claude Work proxy)..."
 
     # Prefer uv (fast, isolated)
     if ($Script:HasUV) {
@@ -551,10 +551,86 @@ Install one of the following and re-run:
 }
 
 # ====================================================================
+# Install clawde CLI wrapper
+# ====================================================================
+function Install-Cli {
+    Write-Info "[3/6] Installing clawde CLI..."
+
+    $tmpDir = Join-Path $env:TEMP "clawde-cli-build-$([System.IO.Path]::GetRandomFileName())"
+    New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+    Register-Rollback $tmpDir
+
+    # Download CLI files
+    $clawdePyUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.py"
+    $pyprojectUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
+    $clawdePyPath = Join-Path $tmpDir "clawde.py"
+    $pyprojectPath = Join-Path $tmpDir "pyproject.toml"
+
+    Write-DebugMsg "Downloading clawde.py..."
+    try {
+        Invoke-WebRequest -Uri $clawdePyUrl -OutFile $clawdePyPath -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+    }
+    catch {
+        Write-Warn "Failed to download clawde.py: $($_.Exception.Message)"
+        if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
+        Write-Warn "clawde CLI was not installed. You can install it manually."
+        return
+    }
+
+    Write-DebugMsg "Downloading pyproject.toml..."
+    try {
+        Invoke-WebRequest -Uri $pyprojectUrl -OutFile $pyprojectPath -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+    }
+    catch {
+        Write-Warn "Failed to download pyproject.toml: $($_.Exception.Message)"
+        if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
+        Write-Warn "clawde CLI was not installed. You can install it manually."
+        return
+    }
+
+    # Install using available package manager
+    Push-Location $tmpDir
+
+    $installed = $false
+
+    if ($Script:HasUV) {
+        Write-DebugMsg "Installing clawde CLI via 'uv tool install .'"
+        $output = uv tool install . 2>&1
+        if ($LASTEXITCODE -eq 0) { $installed = $true }
+    }
+
+    if (-not $installed -and $Script:HasPipx) {
+        Write-DebugMsg "Installing clawde CLI via 'pipx install .'"
+        $output = pipx install . 2>&1
+        if ($LASTEXITCODE -eq 0) { $installed = $true }
+    }
+
+    if (-not $installed -and $Script:HasPip) {
+        Write-DebugMsg "Installing clawde CLI via 'python -m pip install --user .'"
+        $output = & $Script:PYTHON -m pip install --user . 2>&1
+        if ($LASTEXITCODE -eq 0) { $installed = $true }
+    }
+
+    Pop-Location
+
+    # Clean up temp dir
+    if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
+    $Script:RollbackItems = $Script:RollbackItems | Where-Object { $_ -ne $tmpDir }
+
+    if ($installed) {
+        Write-OK "clawde CLI installed"
+    }
+    else {
+        Write-Warn "clawde CLI was not installed. No Python package manager available."
+        Write-Warn "To install manually, run: python -m pip install https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
+    }
+}
+
+# ====================================================================
 # Interactive config wizard
 # ====================================================================
 function Do-InteractiveConfig {
-    Write-Info "[3/5] Claude authentication"
+    Write-Info "[4/6] Claude authentication"
 
     $authMethod = "oauth"
     $cliTokenPath = ""
@@ -589,7 +665,7 @@ function Do-InteractiveConfig {
     }
 
     Write-Host ""
-    Write-Info "[4/5] Configuration"
+    Write-Info "Configuration"
     Write-Host ""
 
     # Port validation
@@ -707,7 +783,7 @@ function Write-ConfigFromEnv {
 # Service setup (Windows Scheduled Task)
 # ====================================================================
 function Setup-Service {
-    Write-Info "[5/5] Setting up service management..."
+    Write-Info "[5/6] Setting up service management..."
 
     $autoStart = $false
 
@@ -921,6 +997,7 @@ try {
 
     Install-OpenCode
     Install-CCProxy
+    Install-Cli
 
     # Config — interactive or non-interactive
     if ($Script:Yes) {

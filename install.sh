@@ -487,7 +487,7 @@ setup_path() {
 # Install OpenCode (binary from GitHub releases)
 # ====================================================================
 install_opencode() {
-  info "[1/5] Installing OpenCode binary..."
+  info "[1/6] Installing OpenCode binary..."
 
   if [[ "${SKIP_OPENCODE:-false}" == "true" ]]; then
     info "OpenCode installation skipped (existing installation preserved)"
@@ -594,7 +594,7 @@ install_opencode_from_source() {
 # Install CCProxy (Python package)
 # ====================================================================
 install_ccproxy() {
-  info "[2/5] Installing CCProxy (Claude Work proxy)..."
+  info "[2/6] Installing CCProxy (Claude Work proxy)..."
 
   # Try uv tool (fast, isolated)
   if command -v uv >/dev/null 2>&1; then
@@ -634,13 +634,89 @@ Install one of the following and re-run:
 }
 
 # ====================================================================
+# Install clawde CLI wrapper
+# ====================================================================
+install_cli() {
+  info "[3/6] Installing clawde CLI..."
+
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  register_rollback "$tmp_dir"
+
+  # Download CLI files
+  debug "Downloading cli/clawde.py..."
+  if ! curl -fsSL --connect-timeout 10 --max-time 30 \
+    "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.py" \
+    -o "${tmp_dir}/clawde.py" 2>/dev/null; then
+    warn "Failed to download clawde.py"
+    rm -rf "$tmp_dir"
+    warn "clawde CLI was not installed. You can install it manually: pip install https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
+    return
+  fi
+
+  debug "Downloading pyproject.toml..."
+  if ! curl -fsSL --connect-timeout 10 --max-time 30 \
+    "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml" \
+    -o "${tmp_dir}/pyproject.toml" 2>/dev/null; then
+    warn "Failed to download pyproject.toml"
+    rm -rf "$tmp_dir"
+    warn "clawde CLI was not installed. You can install it manually."
+    return
+  fi
+
+  # Install using available package manager
+  pushd "$tmp_dir" >/dev/null
+
+  local installed=false
+
+  if command -v uv >/dev/null 2>&1; then
+    debug "Installing clawde CLI via 'uv tool install .'"
+    if uv tool install . 2>&1; then
+      installed=true
+    fi
+  fi
+
+  if ! $installed && command -v pipx >/dev/null 2>&1; then
+    debug "Installing clawde CLI via 'pipx install .'"
+    if pipx install . 2>&1; then
+      installed=true
+    fi
+  fi
+
+  if ! $installed && command -v "${PIP:-pip3}" >/dev/null 2>&1; then
+    local pip_cmd="${PIP:-pip3}"
+    debug "Installing clawde CLI via '${pip_cmd} install --user .'"
+    if $pip_cmd install --user . 2>&1; then
+      installed=true
+    fi
+  fi
+
+  popd >/dev/null
+
+  # Clean up temp dir
+  rm -rf "$tmp_dir"
+  local filtered=()
+  for item in "${ROLLBACK_ITEMS[@]}"; do
+    [[ "$item" != "$tmp_dir" ]] && filtered+=("$item")
+  done
+  ROLLBACK_ITEMS=("${filtered[@]}")
+
+  if $installed; then
+    ok "clawde CLI installed"
+  else
+    warn "clawde CLI was not installed. No Python package manager available."
+    warn "To install manually, run: pip install https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
+  fi
+}
+
+# ====================================================================
 # Config wizard — interactive prompts
 # ====================================================================
 do_interactive_config() {
   local auth_method="" cli_token_path="" port="" auto_start="" models=""
   local auth_choice=""
 
-  info "[3/5] Claude authentication"
+  info "[4/6] Claude authentication"
   echo ""
   echo "  Choose authentication method:"
   echo "    1. OAuth login (opens browser — recommended)"
@@ -668,7 +744,7 @@ do_interactive_config() {
   fi
 
   echo ""
-  info "[4/5] Configuration"
+  info "Configuration"
   echo ""
 
   # Port input with validation
@@ -746,7 +822,7 @@ EOF
 # Service setup (systemd or WSL shell profile)
 # ====================================================================
 setup_service() {
-  info "[5/5] Setting up service management..."
+  info "[5/6] Setting up service management..."
 
   # Read auto_start from config
   local auto_start
@@ -1015,6 +1091,7 @@ main() {
 
   install_opencode
   install_ccproxy
+  install_cli
 
   # Config — interactive or non-interactive
   if [[ "$NONINTERACTIVE" == "true" ]]; then
