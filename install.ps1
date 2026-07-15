@@ -1,12 +1,16 @@
 # clawde installer - Windows (PowerShell 5+)
 #   Claude Work - OpenCode bridge
 #
-# Quick install (run as Administrator):
-#   irm https://clawde.dev/install.ps1 | iex
+# Quick install (interactive):
+#   & ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/ClintonSarkar/clawde@main/install.ps1)))
 #
 # With options:
-#   irm https://clawde.dev/install.ps1 | iex -Yes -Verbose
-#   irm https://clawde.dev/install.ps1 | iex -Uninstall
+#   & ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/ClintonSarkar/clawde@main/install.ps1))) -Yes
+#   & ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/ClintonSarkar/clawde@main/install.ps1))) -Uninstall
+#
+# Or save and run:
+#   .\install.ps1 -Yes -Verbose
+#   .\install.ps1 -Uninstall
 #
 # Environment variables (for CI / automation):
 #   CLAWDE_PORT         Proxy port (default: 8080)
@@ -15,31 +19,16 @@
 #   CLAWDE_AUTO_START   Auto-start on login: true | false (default: false)
 #   CLAWDE_MODELS       Models to expose (default: all)
 
-# clawde installer - Windows (PowerShell 5+)
-# Supports: irm <url> | iex  OR  .\install.ps1 [-Yes] [-Verbose] [-Uninstall]
+# Parse arguments - works with both file execution and scriptblock invocation
+param(
+    [switch]$Yes,
+    [switch]$Verbose,
+    [switch]$Uninstall,
+    [switch]$Help
+)
 
-# Parse arguments (works with both file execution and iex)
-$Yes = $false
-$Verbose = $false
-$Uninstall = $false
-$Help = $false
-if ($args) {
-    foreach ($a in $args) {
-        switch -Wildcard ($a) {
-            "-Yes"       { $Yes = $true }
-            "-Verbose"   { $Verbose = $true }
-            "-Uninstall" { $Uninstall = $true }
-            "-Help"      { $Help = $true }
-        }
-    }
-}
-
-if ($MyInvocation.BoundParameters) {
-    if ($MyInvocation.BoundParameters.ContainsKey("Yes")) { $Yes = $true }
-    if ($MyInvocation.BoundParameters.ContainsKey("Verbose")) { $Verbose = $true }
-    if ($MyInvocation.BoundParameters.ContainsKey("Uninstall")) { $Uninstall = $true }
-    if ($MyInvocation.BoundParameters.ContainsKey("Help")) { $Help = $true }
-}
+# When invoked via irm | iex, $args contains the script text, not flags.
+# The scriptblock::Create approach properly binds params.
 # ====================================================================
 # Constants
 # ====================================================================
