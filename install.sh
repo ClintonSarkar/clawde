@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # clawde installer - Linux / WSL
 #   Claude Work - OpenCode bridge
 #

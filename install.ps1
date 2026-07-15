@@ -1,4 +1,4 @@
-﻿# clawde installer - Windows (PowerShell 5+)
+# clawde installer - Windows (PowerShell 5+)
 #   Claude Work - OpenCode bridge
 #
 # Quick install (run as Administrator):

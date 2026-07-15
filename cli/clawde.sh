@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # clawde.sh - unified CLI for managing OpenCode + CCProxy (Linux/WSL)
 #
 # Commands:

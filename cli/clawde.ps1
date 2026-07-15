@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 # clawde.ps1 - unified CLI for managing OpenCode + CCProxy (Windows)
 #
 # Commands:
