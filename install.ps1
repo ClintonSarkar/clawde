@@ -46,6 +46,8 @@ $Script:InstallCompleted = $false
 $Script:RollbackItems    = @()
 $Script:SkipOpenCode     = $false
 $Script:SkipConfig       = $false
+$Script:ExistingOpenCodePath = $null
+$Script:AuthPending          = $false
 
 # ====================================================================
 # Logging
@@ -238,6 +240,13 @@ function Check-Deps {
 # Detect existing installation (idempotency)
 # ====================================================================
 function Check-Existing {
+    # Check for OpenCode in PATH (system-wide)
+    $pathOpenCode = Get-Command opencode -ErrorAction SilentlyContinue
+    if ($pathOpenCode -and $pathOpenCode.Source -ne $Script:OPENCODE_EXE) {
+        Write-Warn "OpenCode found in PATH at: $($pathOpenCode.Source)"
+        $Script:ExistingOpenCodePath = $pathOpenCode.Source
+    }
+
     $haveOpenCode = Test-Path $Script:OPENCODE_EXE -PathType Leaf
     $haveConfig   = Test-Path $Script:CLAWDE_CONFIG_FILE -PathType Leaf
 
@@ -257,8 +266,14 @@ function Check-Existing {
     }
 
     if ($Script:Yes) {
-        Write-Warn "Non-interactive mode — reinstalling OpenCode and overwriting config"
-        if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
+        if ($Script:ExistingOpenCodePath) {
+            Write-Info "OpenCode found in PATH at: $($Script:ExistingOpenCodePath) — using existing binary"
+            $Script:SkipOpenCode = $true
+        }
+        else {
+            Write-Warn "Non-interactive mode — reinstalling OpenCode and overwriting config"
+            if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
+        }
         return
     }
 
@@ -266,7 +281,8 @@ function Check-Existing {
     Write-Host "  What would you like to do?"
     Write-Host "    1. [R]einstall / update (removes existing installation)"
     Write-Host "    2. [S]kip OpenCode and keep existing config"
-    Write-Host "    3. [C]ancel"
+    Write-Host "    3. [U]se existing OpenCode from PATH"
+    Write-Host "    4. [C]ancel"
     Write-Host ""
     $action = Read-Host "  Select [1]"
     if (-not $action) { $action = "1" }
@@ -277,7 +293,27 @@ function Check-Existing {
         ""  { Write-DebugMsg "User chose reinstall" }
         "2" { Write-Info "Keeping existing installation — skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
         "S*" { Write-Info "Keeping existing installation — skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
-        "3" { Write-Info "Installation cancelled by user."; exit 0 }
+        "3" {
+            if (-not $Script:ExistingOpenCodePath) {
+                Write-Warn "No existing OpenCode found in PATH — defaulting to reinstall"
+                if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
+            }
+            else {
+                Write-Info "Using existing OpenCode from: $($Script:ExistingOpenCodePath)"
+                $Script:SkipOpenCode = $true
+            }
+        }
+        "U*" {
+            if (-not $Script:ExistingOpenCodePath) {
+                Write-Warn "No existing OpenCode found in PATH — defaulting to reinstall"
+                if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
+            }
+            else {
+                Write-Info "Using existing OpenCode from: $($Script:ExistingOpenCodePath)"
+                $Script:SkipOpenCode = $true
+            }
+        }
+        "4" { Write-Info "Installation cancelled by user."; exit 0 }
         "C*" { Write-Info "Installation cancelled by user."; exit 0 }
         default { Write-Warn "Invalid choice '$action', defaulting to reinstall" }
     }
@@ -305,6 +341,12 @@ function Check-Existing {
 function Setup-Path {
     New-Item -ItemType Directory -Path $Script:CLAWDE_BIN_DIR -Force | Out-Null
     Register-Rollback $Script:CLAWDE_BIN_DIR
+
+    # If existing OpenCode is already in PATH, skip PATH management
+    if ($Script:ExistingOpenCodePath -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
+        Write-DebugMsg "Existing OpenCode already in PATH — skipping PATH management for binary dir"
+        return
+    }
 
     $userPath = [Environment]::GetEnvironmentVariable("PATH", "User")
     if ($userPath -notlike "*$($Script:CLAWDE_BIN_DIR)*") {
@@ -506,7 +548,7 @@ function Do-InteractiveConfig {
         $authChoice = Read-Host "  Select [1]"
         if (-not $authChoice) { $authChoice = "1" }
         switch ($authChoice) {
-            "1" { $authMethod = "oauth"; $valid = $true }
+            "1" { $authMethod = "oauth"; $Script:AuthPending = $true; Write-Host ""; Write-Info "You'll complete Claude authentication later. Run 'clawde auth' after install to log in."; $valid = $true }
             "2" { $authMethod = "cli_token"; $valid = $true }
             default { Write-Warn "Please enter 1 (OAuth) or 2 (CLI token)" }
         }
@@ -633,6 +675,9 @@ function Write-ConfigFromEnv {
         $autoStart = "false"
     }
 
+    if ($authMethod -eq "oauth") {
+        $Script:AuthPending = $true
+    }
     Write-Config $authMethod $cliTokenPath $port $autoStart $models
 }
 
@@ -737,6 +782,12 @@ function Final-Message {
     Write-Host "    clawde update    — update to latest version"
     Write-Host "    clawde logs      — tail logs"
     Write-Host ""
+    if ($Script:AuthPending) {
+        Write-Host ""
+        Write-Host "  Note: Claude authentication not yet completed. Run 'clawde auth' to connect your Claude account."
+        Write-Host ""
+    }
+
     Write-Host "  Resources:"
     Write-Host "    Config: $($Script:CLAWDE_CONFIG_FILE)"
     Write-Host "    Logs:   $(Join-Path $Script:CLAWDE_DATA_DIR 'logs\')"

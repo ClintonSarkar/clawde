@@ -43,6 +43,8 @@ OS=""
 ARCH=""
 SKIP_OPENCODE=false
 SKIP_CONFIG=false
+EXISTING_OPENCODE_PATH=""
+AUTH_PENDING=false
 
 # ====================================================================
 # Colors & Logging
@@ -300,6 +302,14 @@ check_existing() {
   local have_opencode=false
   local have_config=false
 
+  # Check for OpenCode in PATH (system-wide)
+  local path_opencode=""
+  path_opencode="$(command -v opencode 2>/dev/null || true)"
+  if [[ -n "$path_opencode" ]] && [[ "$path_opencode" != "$OPENCODE_BIN" ]]; then
+    warn "OpenCode found in PATH at: ${path_opencode}"
+    EXISTING_OPENCODE_PATH="$path_opencode"
+  fi
+
   if [[ -x "$OPENCODE_BIN" ]]; then
     have_opencode=true
   fi
@@ -324,8 +334,13 @@ check_existing() {
   fi
 
   if [[ "$NONINTERACTIVE" == "true" ]]; then
-    warn "Non-interactive mode — reinstalling OpenCode and overwriting config"
-    rm -f "$OPENCODE_BIN" 2>/dev/null || true
+    if [[ -n "${EXISTING_OPENCODE_PATH:-}" ]]; then
+      info "OpenCode found in PATH at: ${EXISTING_OPENCODE_PATH} — using existing binary"
+      SKIP_OPENCODE=true
+    else
+      warn "Non-interactive mode — reinstalling OpenCode and overwriting config"
+      rm -f "$OPENCODE_BIN" 2>/dev/null || true
+    fi
     return 0
   fi
 
@@ -333,7 +348,8 @@ check_existing() {
   echo "  What would you like to do?"
   echo "    1. [R]einstall / update (removes existing installation)"
   echo "    2. [S]kip OpenCode and keep existing config"
-  echo "    3. [C]ancel"
+  echo "    3. [U]se existing OpenCode from PATH"
+  echo "    4. [C]ancel"
   echo ""
   read -rp "  Select [1]: " action
   action="${action:-1}"
@@ -349,7 +365,17 @@ check_existing() {
       SKIP_CONFIG=true
       return 0
       ;;
-    [Cc]|3)
+    [Uu]|3)
+      if [[ -z "${EXISTING_OPENCODE_PATH:-}" ]]; then
+        warn "No existing OpenCode found in PATH — defaulting to reinstall"
+        rm -f "$OPENCODE_BIN" 2>/dev/null || true
+      else
+        info "Using existing OpenCode from: ${EXISTING_OPENCODE_PATH}"
+        SKIP_OPENCODE=true
+        # Do NOT set SKIP_CONFIG — still run config wizard
+      fi
+      ;;
+    [Cc]|4)
       info "Installation cancelled by user."
       exit 0
       ;;
@@ -376,6 +402,12 @@ check_existing() {
 setup_path() {
   mkdir -p "$CLAWDE_BIN_DIR"
   register_rollback "$CLAWDE_BIN_DIR"
+
+  # If existing OpenCode is already in PATH, skip PATH management
+  if [[ -n "${EXISTING_OPENCODE_PATH:-}" ]] && command -v opencode >/dev/null 2>&1; then
+    debug "Existing OpenCode already in PATH — skipping PATH management for binary dir"
+    return 0
+  fi
 
   if [[ ":$PATH:" != *":${CLAWDE_BIN_DIR}:"* ]]; then
     warn "${CLAWDE_BIN_DIR} is not in your PATH"
@@ -588,7 +620,7 @@ do_interactive_config() {
     read -rp "  Select [1]: " auth_choice
     auth_choice="${auth_choice:-1}"
     case "$auth_choice" in
-      1) auth_method="oauth"; break ;;
+      1) auth_method="oauth"; AUTH_PENDING=true; echo ""; info "You'll complete Claude authentication later. Run 'clawde auth' after install to log in."; break ;;
       2) auth_method="cli_token"; break ;;
       *) warn "Please enter 1 (OAuth) or 2 (CLI token)" ;;
     esac
@@ -793,6 +825,11 @@ final_message() {
   echo "    clawde update    — update to latest version"
   echo "    clawde logs      — tail logs"
   echo ""
+  if [[ "${AUTH_PENDING:-false}" == "true" ]]; then
+    echo "  ${BOLD}Note:${NC} Claude authentication not yet completed. Run 'clawde auth' to connect your Claude account."
+    echo ""
+  fi
+
   echo "  ${BOLD}Resources:${NC}"
   echo "    Config: ${CLAWDE_CONFIG_FILE}"
   echo "    Logs:   ${CLAWDE_DATA_DIR}/logs/"
@@ -953,6 +990,9 @@ main() {
   if [[ "$NONINTERACTIVE" == "true" ]]; then
     if [[ "${SKIP_CONFIG:-false}" != "true" ]]; then
       validate_env_vars
+      if [[ "${CLAWDE_AUTH_METHOD:-oauth}" == "oauth" ]]; then
+        AUTH_PENDING=true
+      fi
       write_config \
         "${CLAWDE_AUTH_METHOD:-oauth}" \
         "${CLAWDE_CLI_TOKEN_PATH:-}" \
