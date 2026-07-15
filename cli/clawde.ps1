@@ -165,7 +165,7 @@ function Cmd-Start($extraArgs) {
         $env:OPENCODE_PROVIDER_CLAWDE_API_KEY = "clawde"
         # Interactive foreground - user interacts with this
         Write-Host "[INFO] Attaching to OpenCode console..." -ForegroundColor Cyan
-        Write-Host "[INFO] Press Ctrl+C to stop OpenCode and return to shell`n" -ForegroundColor Cyan
+        Write-Host "[INFO] Use /exit to stop OpenCode and return to shell`n" -ForegroundColor Cyan
         & $opencodeExe $extraArgs
         Write-Host "`n[INFO] OpenCode exited" -ForegroundColor Cyan
     }
