@@ -249,16 +249,28 @@ cmd_update() {
   local opencode_bin
   opencode_bin="$(find_binary opencode 2>/dev/null || true)"
   if [[ -x "$opencode_bin" ]]; then
-    local ver
-    ver="$("$opencode_bin" --version 2>/dev/null || echo "unknown")"
-    local upgrade_output
-    upgrade_output="$("$opencode_bin" upgrade 2>&1 || true)"
-    local new_ver
-    new_ver="$("$opencode_bin" --version 2>/dev/null || echo "unknown")"
-    if [[ "$ver" != "$new_ver" ]]; then
-      echo "  [OK] OpenCode  $ver -> $new_ver"
+    local ver new_ver
+    ver="$("$opencode_bin" --version 2>/dev/null | head -1)"
+    ver="${ver//[[:space:]]/ }"; ver="${ver#"${ver%%[![:space:]]*}"}"; ver="${ver%"${ver##*[![:space:]]}"}"
+    # Suppress upgrade noise: capture all output, only show tail on failure
+    local upgrade_output upgrade_rc
+    upgrade_output="$("$opencode_bin" upgrade 2>&1)"
+    upgrade_rc=$?
+    new_ver="$("$opencode_bin" --version 2>/dev/null | head -1)"
+    new_ver="${new_ver//[[:space:]]/ }"; new_ver="${new_ver#"${new_ver%%[![:space:]]*}"}"; new_ver="${new_ver%"${new_ver##*[![:space:]]}"}"
+    if [[ "$upgrade_rc" -eq 0 ]]; then
+      if [[ "$ver" != "$new_ver" ]]; then
+        echo "  [OK] OpenCode  $ver -> $new_ver"
+      else
+        echo "  [OK] OpenCode  $ver (already latest)"
+      fi
     else
-      echo "  [OK] OpenCode  $ver (already latest)"
+      echo "  [ERROR] OpenCode upgrade failed"
+      # Show last few non-empty lines for debugging
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && echo "         $line"
+      done < <(printf '%s\n' "$upgrade_output" | grep -v '^$' | tail -n 3)
+      any_errors=true
     fi
   else
     echo "  [ERROR] opencode not found"
@@ -269,17 +281,21 @@ cmd_update() {
   local ccproxy_bin
   ccproxy_bin="$(find_binary ccproxy 2>/dev/null || true)"
   if [[ -n "$ccproxy_bin" && -x "$ccproxy_bin" ]]; then
+    # Suppress stderr (config_file_missing warning is harmless)
     local ver
-    ver="$("$ccproxy_bin" --version 2>/dev/null || echo "unknown")"
+    ver="$("$ccproxy_bin" --version 2>/dev/null | head -1)"
+    # Extract version from output like "ccproxy 0.2.10"
+    local current_ver
+    current_ver="$(echo "$ver" | sed -nE 's/.*ccproxy[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+    [[ -z "$current_ver" ]] && current_ver="$(echo "$ver" | sed -nE 's/.*([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')"
+    [[ -z "$current_ver" ]] && current_ver="unknown"
     local release_json latest_tag
     release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" 2>/dev/null)" || {
       echo "  [ERROR] Could not check CCProxy updates"
       any_errors=true
     }
     if [[ -n "$release_json" ]]; then
-      latest_tag="$(echo "$release_json" | grep "\"tag_name\"" | head -1 | sed -E "s/.*\"([^\"]+)\".*/\1/")"
-      local current_ver
-      current_ver="$(echo "$ver" | sed -E 's/.*version[[:space:]]*//' | sed -E 's/[[:space:]].*//' | tr -d '[:space:]')"
+      latest_tag="$(echo "$release_json" | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
       if [[ "v${current_ver}" != "$latest_tag" ]]; then
         echo "  [INFO] CCProxy  v${current_ver} -> $latest_tag"
         local arch asset_name
@@ -295,22 +311,43 @@ cmd_update() {
         download_url="$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_name}[^\"]*\"" | sed -E "s/.*\"([^\"]+)\".*/\1/" | head -1)"
         if [[ -n "$download_url" ]]; then
           local tmp_archive="/tmp/ccproxy-update.tar.gz"
-          local bin_dir="$(dirname "$ccproxy_bin")"
+          local bin_dir
+          bin_dir="$(dirname "$ccproxy_bin")"
           # Stop running ccproxy before overwriting
-          local proxy_pid="$(get_pid proxy)"
+          local proxy_pid
+          proxy_pid="$(get_pid proxy 2>/dev/null || true)"
           if [[ -n "$proxy_pid" ]] && is_running "$proxy_pid"; then
+            echo "  [INFO] Stopping CCProxy (PID $proxy_pid) for update..."
             kill "$proxy_pid" 2>/dev/null || true
             remove_pid proxy
             sleep 0.5
           fi
           if curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$tmp_archive" 2>/dev/null; then
-            tar -xzf "$tmp_archive" -C "$bin_dir" 2>/dev/null
-            if [[ ! -x "$ccproxy_bin" ]]; then
-              local found="$(find "$bin_dir" -name ccproxy -type f -executable | head -1)"
-              if [[ -n "$found" ]]; then mv "$found" "$ccproxy_bin"; chmod +x "$ccproxy_bin"; fi
+            # Extract to temp dir first, then move (avoids in-place overwrite issues)
+            local extract_dir="/tmp/ccproxy-extract"
+            rm -rf "$extract_dir"
+            mkdir -p "$extract_dir"
+            if tar -xzf "$tmp_archive" -C "$extract_dir" 2>/dev/null; then
+              local extracted_exe="$extract_dir/ccproxy"
+              if [[ ! -x "$extracted_exe" ]]; then
+                local found
+                found="$(find "$extract_dir" -name ccproxy -type f -executable 2>/dev/null | head -1)"
+                [[ -n "$found" ]] && extracted_exe="$found"
+              fi
+              if [[ -x "$extracted_exe" ]]; then
+                mv "$extracted_exe" "$ccproxy_bin"
+                chmod +x "$ccproxy_bin"
+                echo "  [OK] CCProxy  updated to $latest_tag"
+              else
+                echo "  [ERROR] ccproxy binary not found after extraction"
+                any_errors=true
+              fi
+              rm -rf "$extract_dir" "$tmp_archive"
+            else
+              echo "  [ERROR] CCProxy extraction failed"
+              rm -rf "$extract_dir" "$tmp_archive"
+              any_errors=true
             fi
-            rm -f "$tmp_archive"
-            echo "  [OK] CCProxy  updated to $latest_tag"
           else
             echo "  [ERROR] CCProxy download failed"
             any_errors=true
@@ -337,6 +374,7 @@ cmd_update() {
     echo "[OK] Update complete"
   fi
 }
+
 
 self_update() {
   local self_url="https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.sh"
