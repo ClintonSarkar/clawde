@@ -634,79 +634,27 @@ Install one of the following and re-run:
 }
 
 # ====================================================================
-# Install clawde CLI wrapper
+# Install clawde CLI wrapper (Bash script - no Python required)
 # ====================================================================
 install_cli() {
   info "[3/6] Installing clawde CLI..."
 
-  local tmp_dir
-  tmp_dir="$(mktemp -d)"
-  register_rollback "$tmp_dir"
+  local clawde_url="https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.sh"
+  local clawde_path="${CLAWDE_BIN_DIR}/clawde"
 
-  # Download CLI files
-  debug "Downloading cli/clawde.py..."
+  debug "Downloading clawde.sh to ${clawde_path}..."
   if ! curl -fsSL --connect-timeout 10 --max-time 30 \
-    "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.py" \
-    -o "${tmp_dir}/clawde.py" 2>/dev/null; then
-    warn "Failed to download clawde.py"
-    rm -rf "$tmp_dir"
-    warn "clawde CLI was not installed. You can install it manually: pip install https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
+    "$clawde_url" -o "$clawde_path" 2>/dev/null; then
+    warn "Failed to download clawde.sh"
+    warn "clawde CLI was not installed. You can install it manually:"
+    warn "  curl -fsSL https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.sh -o ${clawde_path} && chmod +x ${clawde_path}"
     return
   fi
 
-  debug "Downloading pyproject.toml..."
-  if ! curl -fsSL --connect-timeout 10 --max-time 30 \
-    "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml" \
-    -o "${tmp_dir}/pyproject.toml" 2>/dev/null; then
-    warn "Failed to download pyproject.toml"
-    rm -rf "$tmp_dir"
-    warn "clawde CLI was not installed. You can install it manually."
-    return
-  fi
+  chmod +x "$clawde_path"
+  register_rollback "$clawde_path"
 
-  # Install using available package manager
-  pushd "$tmp_dir" >/dev/null
-
-  local installed=false
-
-  if command -v uv >/dev/null 2>&1; then
-    debug "Installing clawde CLI via 'uv tool install .'"
-    if uv tool install . 2>&1; then
-      installed=true
-    fi
-  fi
-
-  if ! $installed && command -v pipx >/dev/null 2>&1; then
-    debug "Installing clawde CLI via 'pipx install .'"
-    if pipx install . 2>&1; then
-      installed=true
-    fi
-  fi
-
-  if ! $installed && command -v "${PIP:-pip3}" >/dev/null 2>&1; then
-    local pip_cmd="${PIP:-pip3}"
-    debug "Installing clawde CLI via '${pip_cmd} install --user .'"
-    if $pip_cmd install --user . 2>&1; then
-      installed=true
-    fi
-  fi
-
-  popd >/dev/null
-
-  # Clean up temp dir
-  rm -rf "$tmp_dir"
-  local filtered=()
-  for item in "${ROLLBACK_ITEMS[@]}"; do
-    [[ "$item" != "$tmp_dir" ]] && filtered+=("$item")
-  done
-  ROLLBACK_ITEMS=("${filtered[@]}")
-
-  if $installed; then
-    ok "clawde CLI installed"
-  else
-    warn "clawde CLI was not installed. No Python package manager available."
-    warn "To install manually, run: pip install https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
-  fi
+  ok "clawde CLI installed to ${clawde_path}"
 }
 
 # ====================================================================

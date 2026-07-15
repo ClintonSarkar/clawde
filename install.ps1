@@ -551,79 +551,35 @@ Install one of the following and re-run:
 }
 
 # ====================================================================
-# Install clawde CLI wrapper
+# Install clawde CLI wrapper (PowerShell — no Python required)
 # ====================================================================
 function Install-Cli {
     Write-Info "[3/6] Installing clawde CLI..."
 
-    $tmpDir = Join-Path $env:TEMP "clawde-cli-build-$([System.IO.Path]::GetRandomFileName())"
-    New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
-    Register-Rollback $tmpDir
+    # Download clawde.ps1 directly into clawde\bin
+    $clawdePs1Url = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.ps1"
+    $clawdePs1Path = Join-Path $Script:CLAWDE_BIN_DIR "clawde.ps1"
+    # CMD shim so users can type 'clawde' from cmd.exe too
+    $clawdeCmdPath = Join-Path $Script:CLAWDE_BIN_DIR "clawde.cmd"
 
-    # Download CLI files
-    $clawdePyUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.py"
-    $pyprojectUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
-    $clawdePyPath = Join-Path $tmpDir "clawde.py"
-    $pyprojectPath = Join-Path $tmpDir "pyproject.toml"
-
-    Write-DebugMsg "Downloading clawde.py..."
+    Write-DebugMsg "Downloading clawde.ps1..."
     try {
-        Invoke-WebRequest -Uri $clawdePyUrl -OutFile $clawdePyPath -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+        Invoke-WebRequest -Uri $clawdePs1Url -OutFile $clawdePs1Path -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
     }
     catch {
-        Write-Warn "Failed to download clawde.py: $($_.Exception.Message)"
-        if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
+        Write-Warn "Failed to download clawde.ps1: $($_.Exception.Message)"
         Write-Warn "clawde CLI was not installed. You can install it manually."
         return
     }
 
-    Write-DebugMsg "Downloading pyproject.toml..."
-    try {
-        Invoke-WebRequest -Uri $pyprojectUrl -OutFile $pyprojectPath -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
-    }
-    catch {
-        Write-Warn "Failed to download pyproject.toml: $($_.Exception.Message)"
-        if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
-        Write-Warn "clawde CLI was not installed. You can install it manually."
-        return
-    }
+    Register-Rollback $clawdePs1Path
+    Register-Rollback $clawdeCmdPath
 
-    # Install using available package manager
-    Push-Location $tmpDir
+    # Create CMD shim that calls the PowerShell script
+    $cmdShim = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0clawde.ps1" %*"
+    Set-Content -Path $clawdeCmdPath -Value $cmdShim -Encoding ASCII
 
-    $installed = $false
-
-    if ($Script:HasUV) {
-        Write-DebugMsg "Installing clawde CLI via 'uv tool install .'"
-        $output = uv tool install . 2>&1
-        if ($LASTEXITCODE -eq 0) { $installed = $true }
-    }
-
-    if (-not $installed -and $Script:HasPipx) {
-        Write-DebugMsg "Installing clawde CLI via 'pipx install .'"
-        $output = pipx install . 2>&1
-        if ($LASTEXITCODE -eq 0) { $installed = $true }
-    }
-
-    if (-not $installed -and $Script:HasPip) {
-        Write-DebugMsg "Installing clawde CLI via 'python -m pip install --user .'"
-        $output = & $Script:PYTHON -m pip install --user . 2>&1
-        if ($LASTEXITCODE -eq 0) { $installed = $true }
-    }
-
-    Pop-Location
-
-    # Clean up temp dir
-    if (Test-Path $tmpDir) { Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue }
-    $Script:RollbackItems = $Script:RollbackItems | Where-Object { $_ -ne $tmpDir }
-
-    if ($installed) {
-        Write-OK "clawde CLI installed"
-    }
-    else {
-        Write-Warn "clawde CLI was not installed. No Python package manager available."
-        Write-Warn "To install manually, run: python -m pip install https://raw.githubusercontent.com/ClintonSarkar/clawde/main/pyproject.toml"
-    }
+    Write-OK "clawde CLI installed to $clawdePs1Path"
 }
 
 # ====================================================================
