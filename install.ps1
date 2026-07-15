@@ -1,5 +1,5 @@
-# clawde installer — Windows (PowerShell 5+)
-#   Claude Work → OpenCode bridge
+﻿# clawde installer " Windows (PowerShell 5+)
+#   Claude Work ' OpenCode bridge
 #
 # Quick install (run as Administrator):
 #   irm https://clawde.dev/install.ps1 | iex
@@ -74,7 +74,7 @@ function Show-Help {
     @"
 Usage: install.ps1 [OPTIONS]
 
-Install clawde — the Claude Work to OpenCode bridge.
+Install clawde " the Claude Work to OpenCode bridge.
 
 Options:
   -Yes          Non-interactive mode; accept all defaults
@@ -116,7 +116,7 @@ function Invoke-Rollback {
     if ($Script:RollbackItems.Count -eq 0) { return }
 
     Write-Host ""
-    Write-Warn "Installation did not complete — rolling back..."
+    Write-Warn "Installation did not complete " rolling back..."
     foreach ($item in $Script:RollbackItems) {
         if (Test-Path -LiteralPath $item -PathType Leaf) {
             Remove-Item -LiteralPath $item -Force -ErrorAction SilentlyContinue
@@ -143,10 +143,10 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action 
 # ====================================================================
 function Show-Banner {
     Write-Host ""
-    Write-Host "  ╔══════════════════════════════════════╗"
-    Write-Host "  ║         clawde installer v$($Script:CLAWDE_VERSION)          ║"
-    Write-Host "  ║  Claude Work -> OpenCode bridge       ║"
-    Write-Host "  ╚══════════════════════════════════════╝"
+    Write-Host "  ""
+    Write-Host "  '         clawde installer v$($Script:CLAWDE_VERSION)          '"
+    Write-Host "  '  Claude Work -> OpenCode bridge       '"
+    Write-Host "  "
     Write-Host ""
 }
 
@@ -159,7 +159,7 @@ function Detect-Arch {
         "AMD64"     { return "x64" }
         "ARM64"     { return "arm64" }
         default {
-            Write-Warn "Unrecognized architecture: $arch — assuming x64 (may cause runtime issues)"
+            Write-Warn "Unrecognized architecture: $arch " assuming x64 (may cause runtime issues)"
             return "x64"
         }
     }
@@ -196,30 +196,27 @@ function Check-Deps {
         $missing += "curl / Invoke-WebRequest (built into PowerShell)"
     }
 
-    # Check for Python
+    # Python is optional - only needed for legacy ccproxy pip install
+    # (clawde CLI and ccproxy binary are downloaded directly, no Python needed)
     $python = Get-Command python -ErrorAction SilentlyContinue
     $python3 = Get-Command python3 -ErrorAction SilentlyContinue
     $Script:PYTHON = if ($python) { "python" } elseif ($python3) { "python3" } else { $null }
 
-    if (-not $Script:PYTHON) {
-        $missing += "python — https://www.python.org/downloads/"
+    if ($Script:PYTHON) {
+        Write-DebugMsg "Python found: $Script:PYTHON (optional, not required)"
+    } else {
+        Write-DebugMsg "Python not found (optional - not needed for clawde)"
     }
 
-    # Check for Python package managers
+    # Check for Python package managers (optional, for legacy uninstall only)
     $Script:HasUV   = [bool](Get-Command uv -ErrorAction SilentlyContinue)
     $Script:HasPipx = [bool](Get-Command pipx -ErrorAction SilentlyContinue)
     $Script:HasPip  = $false
 
     if ($Script:PYTHON) {
-        # Check if pip is available via python -m pip
         & $Script:PYTHON -m pip --version > $null 2>&1
         if ($LASTEXITCODE -eq 0) { $Script:HasPip = $true }
     }
-
-    if (-not $Script:HasUV -and -not $Script:HasPipx -and -not $Script:HasPip) {
-        Write-Warn "No Python package manager found."
-        Write-Warn "  Recommended: install uv — https://docs.astral.sh/uv/"
-        Write-Warn "  Or: python -m pip install pipx"
     }
 
     # Check for git (only needed for source builds)
@@ -289,11 +286,11 @@ function Check-Existing {
 
     if ($Script:Yes) {
         if ($Script:ExistingOpenCodePath) {
-            Write-Info "OpenCode found in PATH at: $($Script:ExistingOpenCodePath) — using existing binary"
+            Write-Info "OpenCode found in PATH at: $($Script:ExistingOpenCodePath) " using existing binary"
             $Script:SkipOpenCode = $true
         }
         else {
-            Write-Warn "Non-interactive mode — reinstalling OpenCode and overwriting config"
+            Write-Warn "Non-interactive mode " reinstalling OpenCode and overwriting config"
             if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
         }
         return
@@ -313,11 +310,11 @@ function Check-Existing {
         "1" { Write-DebugMsg "User chose reinstall" }
         "R*" { Write-DebugMsg "User chose reinstall" }
         ""  { Write-DebugMsg "User chose reinstall" }
-        "2" { Write-Info "Keeping existing installation — skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
-        "S*" { Write-Info "Keeping existing installation — skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
+        "2" { Write-Info "Keeping existing installation " skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
+        "S*" { Write-Info "Keeping existing installation " skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
         "3" {
             if (-not $Script:ExistingOpenCodePath) {
-                Write-Warn "No existing OpenCode found in PATH — defaulting to reinstall"
+                Write-Warn "No existing OpenCode found in PATH " defaulting to reinstall"
                 if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
             }
             else {
@@ -327,7 +324,7 @@ function Check-Existing {
         }
         "U*" {
             if (-not $Script:ExistingOpenCodePath) {
-                Write-Warn "No existing OpenCode found in PATH — defaulting to reinstall"
+                Write-Warn "No existing OpenCode found in PATH " defaulting to reinstall"
                 if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
             }
             else {
@@ -366,7 +363,7 @@ function Setup-Path {
 
     # If existing OpenCode is already in PATH, skip PATH management
     if ($Script:ExistingOpenCodePath -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
-        Write-DebugMsg "Existing OpenCode already in PATH — skipping PATH management for binary dir"
+        Write-DebugMsg "Existing OpenCode already in PATH " skipping PATH management for binary dir"
         return
     }
 
@@ -509,49 +506,79 @@ function Install-OpenCodeFromSource {
 function Install-CCProxy {
     Write-Info "[2/6] Installing CCProxy (Claude Work proxy)..."
 
-    # Prefer uv (fast, isolated)
-    if ($Script:HasUV) {
-        Write-DebugMsg "Installing $($Script:CCPROXY_PACKAGE)[all] via 'uv tool install'"
-        $output = uv tool install "$($Script:CCPROXY_PACKAGE)[all]" 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-OK "CCProxy installed via uv"
-            return
-        }
-        Write-Warn "uv installation failed (exit $LASTEXITCODE) — trying pipx..."
-        Write-DebugMsg $output
+    New-Item -ItemType Directory -Path $Script:CLAWDE_BIN_DIR -Force | Out-Null
+
+    # Check if ccproxy already installed
+    $ccproxyExe = Join-Path $Script:CLAWDE_BIN_DIR "ccproxy.exe"
+    if (Test-Path $ccproxyExe) {
+        $ver = & $ccproxyExe --version 2>&1
+        Write-OK "CCProxy already installed ($ver)"
+        return
     }
 
-    # Try pipx
-    if ($Script:HasPipx) {
-        Write-DebugMsg "Installing $($Script:CCPROXY_PACKAGE)[all] via 'pipx install'"
-        $output = pipx install "$($Script:CCPROXY_PACKAGE)[all]" 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-OK "CCProxy installed via pipx"
-            return
-        }
-        Write-Warn "pipx installation failed (exit $LASTEXITCODE) — trying pip..."
-        Write-DebugMsg $output
+    # Fetch latest release info from upstream
+    Write-DebugMsg "Fetching latest CCProxy release..."
+    try {
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" -TimeoutSec 15
+        $tagName = $release.tag_name
+        Write-DebugMsg "Latest CCProxy release: $tagName"
+    } catch {
+        Write-Err "Failed to fetch CCProxy release info: $($_.Exception.Message)"
+        return
     }
 
-    # Fallback to pip
-    if ($Script:HasPip) {
-        Write-DebugMsg "Installing $($Script:CCPROXY_PACKAGE)[all] via 'python -m pip install'"
-        $output = & $Script:PYTHON -m pip install --user "$($Script:CCPROXY_PACKAGE)[all]" 2>&1
-        if ($LASTEXITCODE -eq 0) {
-            Write-OK "CCProxy installed via pip"
-            return
-        }
-        Write-Err "pip installation failed. Try: $($Script:PYTHON) -m pip install $($Script:CCPROXY_PACKAGE)[all]"
+    # Determine platform-specific asset
+    $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "i686" }
+    $assetName = "ccproxy-${tagName}-${arch}-pc-windows-msvc.zip"
+    $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
+    if (-not $asset) {
+        Write-Err "CCProxy binary not found for Windows ${arch} in release ${tagName}"
+        Write-Err "Available assets: $($release.assets.name -join ', ')"
+        return
     }
 
-    Write-Err "No Python package manager available.
-Install one of the following and re-run:
-  - uv:  powershell -c ""irm https://astral.sh/uv/install.ps1 | iex""
-  - pipx: $($Script:PYTHON) -m pip install --user pipx"
+    # Download and extract
+    $zipPath = Join-Path $env:TEMP "ccproxy-${tagName}.zip"
+    Write-DebugMsg "Downloading $assetName..."
+    try {
+        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
+    } catch {
+        Write-Err "Failed to download CCProxy: $($_.Exception.Message)"
+        return
+    }
+
+    Register-Rollback $zipPath
+    Register-Rollback $ccproxyExe
+
+    Write-DebugMsg "Extracting to $Script:CLAWDE_BIN_DIR..."
+    try {
+        Expand-Archive -Path $zipPath -DestinationPath $Script:CLAWDE_BIN_DIR -Force
+        # The zip may contain ccproxy.exe at root or in a subfolder
+        $extractedExe = Join-Path $Script:CLAWDE_BIN_DIR "ccproxy.exe"
+        if (-not (Test-Path $extractedExe)) {
+            # Search for it in subfolders
+            $found = Get-ChildItem $Script:CLAWDE_BIN_DIR -Recurse -Filter "ccproxy.exe" | Select-Object -First 1
+            if ($found) {
+                Move-Item $found.FullName $extractedExe -Force
+            }
+        }
+        if (Test-Path $extractedExe) {
+            $ver = & $extractedExe --version 2>&1
+            Write-OK "CCProxy installed ($ver)"
+        } else {
+            Write-Err "ccproxy.exe not found after extraction"
+        }
+    } catch {
+        Write-Err "Failed to extract CCProxy: $($_.Exception.Message)"
+    }
+
+    # Cleanup
+    if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
+    $Script:RollbackItems = $Script:RollbackItems | Where-Object { $_ -ne $zipPath }
 }
 
 # ====================================================================
-# Install clawde CLI wrapper (PowerShell — no Python required)
+# Install clawde CLI wrapper (PowerShell - no Python required)
 # ====================================================================
 function Install-Cli {
     Write-Info "[3/6] Installing clawde CLI..."
@@ -593,7 +620,7 @@ function Do-InteractiveConfig {
 
     Write-Host ""
     Write-Host "  Choose authentication method:"
-    Write-Host "    1. OAuth login (opens browser — recommended)"
+    Write-Host "    1. OAuth login (opens browser " recommended)"
     Write-Host "    2. Use existing Claude CLI token"
     Write-Host ""
 
@@ -673,7 +700,7 @@ function Write-Config {
     }
 
     $configContent = @"
-# clawde configuration — generated by installer v$($Script:CLAWDE_VERSION)
+# clawde configuration " generated by installer v$($Script:CLAWDE_VERSION)
 # Docs: https://github.com/ClintonSarkar/clawde
 
 [proxy]
@@ -752,7 +779,7 @@ function Setup-Service {
     }
 
     if (-not $autoStart) {
-        Write-OK "Auto-start disabled — use 'clawde start' to launch manually"
+        Write-OK "Auto-start disabled " use 'clawde start' to launch manually"
         return
     }
 
@@ -762,7 +789,7 @@ function Setup-Service {
     # Look for ccproxy in PATH
     $ccproxyPath = (Get-Command ccproxy -ErrorAction SilentlyContinue).Source
     if (-not $ccproxyPath) {
-        Write-Warn "ccproxy not found in PATH — trying common locations..."
+        Write-Warn "ccproxy not found in PATH " trying common locations..."
         $candidates = @(
             Join-Path $env:LOCALAPPDATA "pipx\venvs\ccproxy-api\Scripts\ccproxy.exe"
             Join-Path $env:LOCALAPPDATA "clawde\bin\ccproxy.exe"
@@ -826,15 +853,15 @@ function Final-Message {
     Write-OK "clawde v$($Script:CLAWDE_VERSION) is installed and ready!"
     Write-Host ""
     Write-Host "  Quick start:"
-    Write-Host "    clawde start     — launch proxy + OpenCode"
-    Write-Host "    clawde stop      — stop all services"
-    Write-Host "    clawde status    — check health"
+    Write-Host "    clawde start     " launch proxy + OpenCode"
+    Write-Host "    clawde stop      " stop all services"
+    Write-Host "    clawde status    " check health"
     Write-Host ""
     Write-Host "  Management:"
-    Write-Host "    clawde config    — reconfigure"
-    Write-Host "    clawde auth      — re-authenticate Claude"
-    Write-Host "    clawde update    — update to latest version"
-    Write-Host "    clawde logs      — tail logs"
+    Write-Host "    clawde config    " reconfigure"
+    Write-Host "    clawde auth      " re-authenticate Claude"
+    Write-Host "    clawde update    " update to latest version"
+    Write-Host "    clawde logs      " tail logs"
     Write-Host ""
     if ($Script:AuthPending) {
         Write-Host ""
@@ -921,7 +948,7 @@ function Uninstall-Clawde {
     }
 
     if (-not $removedAnything) {
-        Write-Info "Nothing to uninstall — clawde is not installed."
+        Write-Info "Nothing to uninstall " clawde is not installed."
     }
     else {
         Write-Host ""
@@ -955,7 +982,7 @@ try {
     Install-CCProxy
     Install-Cli
 
-    # Config — interactive or non-interactive
+    # Config " interactive or non-interactive
     if ($Script:Yes) {
         if (-not $Script:SkipConfig) {
             Write-ConfigFromEnv
@@ -980,3 +1007,4 @@ catch {
 If you need help, please open an issue at:
   https://github.com/ClintonSarkar/clawde/issues/new"
 }
+

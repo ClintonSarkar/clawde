@@ -250,15 +250,12 @@ function Cmd-Update {
 
     $opencodeExe = Find-Binary "opencode.exe"
     if ($opencodeExe) {
-        $ver = & $opencodeExe version 2>&1
+        $ver = & $opencodeExe --version 2>&1
         Write-Host "  Current: $ver"
-    }
-
-    try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ClintonSarkar/opencode/releases/latest" -TimeoutSec 15
-        Write-Host "  Latest:  $($release.tag_name)"
-    } catch {
-        Write-Host "  [ERROR] Could not fetch latest release: $_" -ForegroundColor Red
+        Write-Host "  Running self-upgrade..."
+        & $opencodeExe upgrade 2>&1
+    } else {
+        Write-Host "  [ERROR] opencode not found" -ForegroundColor Red
     }
 
     Write-Host ""

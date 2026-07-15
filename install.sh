@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
-# clawde installer — Linux / WSL
-#   Claude Work → OpenCode bridge
+﻿#!/usr/bin/env bash
+# clawde installer  Linux / WSL
+#   Claude Work  OpenCode bridge
 #
 # Usage:
 #   curl -fsSL https://clawde.dev/install.sh | bash
@@ -67,10 +67,10 @@ debug() { [[ "$VERBOSE" == "true" ]] && echo -e "[DEBUG] $*"; }
 # ====================================================================
 banner() {
   echo ""
-  echo "  ╔══════════════════════════════════════╗"
-  echo "  ║         clawde installer v${CLAWDE_VERSION}        ║"
-  echo "  ║  Claude Work → OpenCode bridge       ║"
-  echo "  ╚══════════════════════════════════════╝"
+  echo "  "
+  echo "           clawde installer v${CLAWDE_VERSION}        "
+  echo "    Claude Work  OpenCode bridge       "
+  echo "  "
   echo ""
 }
 
@@ -81,7 +81,7 @@ usage() {
   cat <<EOF
 Usage: $0 [OPTIONS]
 
-Install clawde — the Claude Work to OpenCode bridge.
+Install clawde  the Claude Work to OpenCode bridge.
 
 Options:
   -y, --yes         Non-interactive mode; accept all defaults
@@ -139,7 +139,7 @@ cleanup_on_exit() {
     return 0
   fi
   echo ""
-  warn "Installation did not complete (exit code $exit_code) — rolling back..."
+  warn "Installation did not complete (exit code $exit_code)  rolling back..."
   for item in "${ROLLBACK_ITEMS[@]}"; do
     if [[ -f "$item" ]]; then
       rm -f "$item" 2>/dev/null || true
@@ -186,7 +186,7 @@ detect_os() {
     x86_64|amd64)   ARCH="x64";;
     aarch64|arm64)  ARCH="arm64";;
     *)
-      warn "Unrecognized architecture: $arch — assuming x64 (may cause runtime issues)"
+      warn "Unrecognized architecture: $arch  assuming x64 (may cause runtime issues)"
       ARCH="x64"
       ;;
   esac
@@ -220,25 +220,20 @@ check_deps() {
   command -v curl >/dev/null 2>&1 || missing+=("curl")
   command -v bash >/dev/null 2>&1 || missing+=("bash")
 
-  # Python
+  # Python (optional - not needed for clawde CLI or ccproxy binary)
   if command -v python3 >/dev/null 2>&1; then
     has_python=true
     PYTHON=python3
   elif command -v python >/dev/null 2>&1; then
-    # On some distros python3 doesn't exist but python does
     local pyver
-    pyver="$(python --version 2>&1 | grep -oP '\d+\.\d+')"
+    pyver="$(python --version 2>&1 | grep -oP "\d+\.\d+")"
     if [[ "${pyver%%.*}" -ge 3 ]]; then
       has_python=true
       PYTHON=python
-    else
-      missing+=("python3 (got python 2)")
     fi
-  else
-    missing+=("python3")
   fi
 
-  # Python package managers (at least one needed)
+  # Python package managers (optional, for legacy uninstall only)
   command -v uv >/dev/null 2>&1 && has_uv=true
   command -v pipx >/dev/null 2>&1 && has_pipx=true
   if command -v pip3 >/dev/null 2>&1; then
@@ -246,14 +241,10 @@ check_deps() {
   elif command -v pip >/dev/null 2>&1; then
     has_pip=true; PIP=pip
   fi
-
-  if ! $has_uv && ! $has_pipx && ! $has_pip; then
-    optional+=("uv (recommended) — https://docs.astral.sh/uv/")
-    optional+=("or pipx — https://pipx.pypa.io/")
   fi
 
   # git (only needed for source builds)
-  command -v git >/dev/null 2>&1 || optional+=("git — https://git-scm.com/ (for source builds)")
+  command -v git >/dev/null 2>&1 || optional+=("git  https://git-scm.com/ (for source builds)")
 
   # --- Report ---
   if [[ ${#missing[@]} -gt 0 ]]; then
@@ -296,7 +287,7 @@ show_version() {
 }
 
 # ====================================================================
-# Idempotency — detect existing installation
+# Idempotency  detect existing installation
 # ====================================================================
 check_existing() {
   local have_opencode=false
@@ -365,10 +356,10 @@ check_existing() {
 
   if [[ "$NONINTERACTIVE" == "true" ]]; then
     if [[ -n "${EXISTING_OPENCODE_PATH:-}" ]]; then
-      info "OpenCode found in PATH at: ${EXISTING_OPENCODE_PATH} — using existing binary"
+      info "OpenCode found in PATH at: ${EXISTING_OPENCODE_PATH}  using existing binary"
       SKIP_OPENCODE=true
     else
-      warn "Non-interactive mode — reinstalling OpenCode and overwriting config"
+      warn "Non-interactive mode  reinstalling OpenCode and overwriting config"
       rm -f "$OPENCODE_BIN" 2>/dev/null || true
     fi
     return 0
@@ -390,19 +381,19 @@ check_existing() {
       rm -f "$OPENCODE_BIN" 2>/dev/null || true
       ;;
     [Ss]|2)
-      info "Keeping existing installation — skipping OpenCode and config"
+      info "Keeping existing installation  skipping OpenCode and config"
       SKIP_OPENCODE=true
       SKIP_CONFIG=true
       return 0
       ;;
     [Uu]|3)
       if [[ -z "${EXISTING_OPENCODE_PATH:-}" ]]; then
-        warn "No existing OpenCode found in PATH — defaulting to reinstall"
+        warn "No existing OpenCode found in PATH  defaulting to reinstall"
         rm -f "$OPENCODE_BIN" 2>/dev/null || true
       else
         info "Using existing OpenCode from: ${EXISTING_OPENCODE_PATH}"
         SKIP_OPENCODE=true
-        # Do NOT set SKIP_CONFIG — still run config wizard
+        # Do NOT set SKIP_CONFIG  still run config wizard
       fi
       ;;
     [Cc]|4)
@@ -435,7 +426,7 @@ setup_path() {
 
   # If existing OpenCode is already in PATH, skip PATH management
   if [[ -n "${EXISTING_OPENCODE_PATH:-}" ]] && command -v opencode >/dev/null 2>&1; then
-    debug "Existing OpenCode already in PATH — skipping PATH management for binary dir"
+    debug "Existing OpenCode already in PATH  skipping PATH management for binary dir"
     return 0
   fi
 
@@ -591,46 +582,91 @@ install_opencode_from_source() {
 }
 
 # ====================================================================
-# Install CCProxy (Python package)
+# Install CCProxy (binary from GitHub releases)
 # ====================================================================
 install_ccproxy() {
   info "[2/6] Installing CCProxy (Claude Work proxy)..."
 
-  # Try uv tool (fast, isolated)
-  if command -v uv >/dev/null 2>&1; then
-    debug "Installing ${CCPROXY_PACKAGE}[all] via 'uv tool install'"
-    if uv tool install "${CCPROXY_PACKAGE}[all]" 2>&1; then
-      ok "CCProxy installed via uv"
-      return
-    fi
-    warn "uv installation failed — trying pipx..."
+  mkdir -p "$CLAWDE_BIN_DIR"
+
+  local ccproxy_exe="${CLAWDE_BIN_DIR}/ccproxy"
+  if [[ -x "$ccproxy_exe" ]]; then
+    local ver
+    ver="$("$ccproxy_exe" --version 2>/dev/null || echo "unknown")"
+    ok "CCProxy already installed ($ver)"
+    return
   fi
 
-  # Try pipx
-  if command -v pipx >/dev/null 2>&1; then
-    debug "Installing ${CCPROXY_PACKAGE}[all] via 'pipx install'"
-    if pipx install "${CCPROXY_PACKAGE}[all]" 2>&1; then
-      ok "CCProxy installed via pipx"
-      return
-    fi
-    warn "pipx installation failed — trying pip..."
+  # Fetch latest release info
+  debug "Fetching latest CCProxy release..."
+  local release_json
+  release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 \
+    "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" 2>/dev/null)" || {
+    warn "Failed to fetch CCProxy release info"
+    return
+  }
+
+  local tag_name
+  tag_name="$(echo "$release_json" | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+  debug "Latest CCProxy release: $tag_name"
+
+  # Determine platform-specific asset
+  local arch asset_name
+  arch="$(uname -m)"
+  case "$(uname -s):${arch}" in
+    Linux:x86_64)   asset_name="ccproxy-${tag_name}-x86_64-unknown-linux-gnu.tar.gz" ;;
+    Linux:aarch64)  asset_name="ccproxy-${tag_name}-x86_64-unknown-linux-gnu.tar.gz" ;;
+    Darwin:x86_64)  asset_name="ccproxy-${tag_name}-x86_64-apple-darwin.tar.gz" ;;
+    Darwin:arm64|Darwin:aarch64) asset_name="ccproxy-${tag_name}-aarch64-apple-darwin.tar.gz" ;;
+    *) warn "Unsupported platform: $(uname -s) ${arch}"; return ;;
+  esac
+
+  local download_url
+  download_url="$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_name}[^\"]*\"" | sed -E 's/.*"([^"]+)".*/\1/' | head -1)"
+  if [[ -z "$download_url" ]]; then
+    warn "CCProxy binary not found for platform in release $tag_name"
+    return
   fi
 
-  # Try pip --user
-  if command -v "${PIP:-pip3}" >/dev/null 2>&1; then
-    local pip_cmd="${PIP:-pip3}"
-    debug "Installing ${CCPROXY_PACKAGE}[all] via '${pip_cmd} install --user'"
-    if $pip_cmd install --user "${CCPROXY_PACKAGE}[all]" 2>&1; then
-      ok "CCProxy installed via ${pip_cmd}"
-      return
-    fi
-    error "pip installation failed. Try: ${pip_cmd} install ${CCPROXY_PACKAGE}[all]"
+  # Download and extract
+  local tmp_archive="/tmp/ccproxy-${tag_name}.tar.gz"
+  debug "Downloading $asset_name..."
+  if ! curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$tmp_archive" 2>/dev/null; then
+    warn "Failed to download CCProxy"
+    return
   fi
 
-  error "No Python package manager available.
-Install one of the following and re-run:
-  - uv:  curl -fsSL https://astral.sh/uv/install.sh | bash
-  - pipx: python3 -m pip install --user pipx && python3 -m pipx ensurepath"
+  register_rollback "$tmp_archive"
+  register_rollback "$ccproxy_exe"
+
+  debug "Extracting to $CLAWDE_BIN_DIR..."
+  tar -xzf "$tmp_archive" -C "$CLAWDE_BIN_DIR" 2>/dev/null
+
+  # The tarball may contain ccproxy at root or in a subfolder
+  if [[ ! -x "$ccproxy_exe" ]]; then
+    local found
+    found="$(find "$CLAWDE_BIN_DIR" -name ccproxy -type f -executable | head -1)"
+    if [[ -n "$found" ]]; then
+      mv "$found" "$ccproxy_exe"
+      chmod +x "$ccproxy_exe"
+    fi
+  fi
+
+  if [[ -x "$ccproxy_exe" ]]; then
+    local ver
+    ver="$("$ccproxy_exe" --version 2>/dev/null || echo "unknown")"
+    ok "CCProxy installed ($ver)"
+  else
+    warn "ccproxy not found after extraction"
+  fi
+
+  # Cleanup
+  rm -f "$tmp_archive"
+  local filtered=()
+  for item in "${ROLLBACK_ITEMS[@]}"; do
+    [[ "$item" != "$tmp_archive" ]] && filtered+=("$item")
+  done
+  ROLLBACK_ITEMS=("${filtered[@]}")
 }
 
 # ====================================================================
@@ -658,7 +694,7 @@ install_cli() {
 }
 
 # ====================================================================
-# Config wizard — interactive prompts
+# Config wizard  interactive prompts
 # ====================================================================
 do_interactive_config() {
   local auth_method="" cli_token_path="" port="" auto_start="" models=""
@@ -667,7 +703,7 @@ do_interactive_config() {
   info "[4/6] Claude authentication"
   echo ""
   echo "  Choose authentication method:"
-  echo "    1. OAuth login (opens browser — recommended)"
+  echo "    1. OAuth login (opens browser  recommended)"
   echo "    2. Use existing Claude CLI token"
   echo ""
   while true; do
@@ -740,7 +776,7 @@ write_config() {
   fi
 
   cat > "$CLAWDE_CONFIG_FILE" << EOF
-# clawde configuration — generated by installer v${CLAWDE_VERSION}
+# clawde configuration  generated by installer v${CLAWDE_VERSION}
 # Docs: https://github.com/ClintonSarkar/clawde
 
 [proxy]
@@ -782,13 +818,13 @@ setup_service() {
   fi
 
   if [[ "$auto_start" != "true" ]]; then
-    ok "Auto-start disabled — use 'clawde start' to launch manually"
+    ok "Auto-start disabled  use 'clawde start' to launch manually"
     return 0
   fi
 
   # --- WSL without systemd ---
   if $IS_WSL && ! command -v systemctl >/dev/null 2>&1; then
-    info "WSL without systemd detected — setting up shell-profile auto-start"
+    info "WSL without systemd detected  setting up shell-profile auto-start"
 
     local rc_file=""
     for f in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
@@ -829,7 +865,7 @@ setup_service() {
 
     cat > "$SYSTEMD_SERVICE_FILE" << EOF
 [Unit]
-Description=clawde — CCProxy (Claude Work proxy)
+Description=clawde  CCProxy (Claude Work proxy)
 Documentation=https://github.com/ClintonSarkar/clawde
 After=network-online.target
 Wants=network-online.target
@@ -858,7 +894,7 @@ EOF
     return 0
   fi
 
-  warn "No service manager detected — you'll need to start clawde manually"
+  warn "No service manager detected  you'll need to start clawde manually"
 }
 
 # ====================================================================
@@ -869,15 +905,15 @@ final_message() {
   ok "clawde v${CLAWDE_VERSION} is installed and ready!"
   echo ""
   echo "  ${BOLD}Quick start:${NC}"
-  echo "    clawde start     — launch proxy + OpenCode"
-  echo "    clawde stop      — stop all services"
-  echo "    clawde status    — check health"
+  echo "    clawde start      launch proxy + OpenCode"
+  echo "    clawde stop       stop all services"
+  echo "    clawde status     check health"
   echo ""
   echo "  ${BOLD}Management:${NC}"
-  echo "    clawde config    — reconfigure"
-  echo "    clawde auth      — re-authenticate Claude"
-  echo "    clawde update    — update to latest version"
-  echo "    clawde logs      — tail logs"
+  echo "    clawde config     reconfigure"
+  echo "    clawde auth       re-authenticate Claude"
+  echo "    clawde update     update to latest version"
+  echo "    clawde logs       tail logs"
   echo ""
   if [[ "${AUTH_PENDING:-false}" == "true" ]]; then
     echo "  ${BOLD}Note:${NC} Claude authentication not yet completed. Run 'clawde auth' to connect your Claude account."
@@ -980,7 +1016,7 @@ uninstall() {
   fi
 
   if ! $removed_anything; then
-    info "Nothing to uninstall — clawde is not installed."
+    info "Nothing to uninstall  clawde is not installed."
   else
     echo ""
     ok "clawde has been completely uninstalled."
@@ -1041,7 +1077,7 @@ main() {
   install_ccproxy
   install_cli
 
-  # Config — interactive or non-interactive
+  # Config  interactive or non-interactive
   if [[ "$NONINTERACTIVE" == "true" ]]; then
     if [[ "${SKIP_CONFIG:-false}" != "true" ]]; then
       validate_env_vars

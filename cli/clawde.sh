@@ -237,16 +237,12 @@ cmd_update() {
   opencode_bin="$(find_binary opencode)"
   if [[ -x "$opencode_bin" ]]; then
     local ver
-    ver="$("$opencode_bin" version 2>/dev/null || echo "unknown")"
+    ver="$("$opencode_bin" --version 2>/dev/null || echo "unknown")"
     echo "  Current: $ver"
-  fi
-
-  local latest_tag
-  latest_tag="$(curl -sf "https://api.github.com/repos/ClintonSarkar/opencode/releases/latest" 2>/dev/null | grep '"tag_name"' | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
-  if [[ -n "$latest_tag" ]]; then
-    echo "  Latest:  $latest_tag"
+    echo "  Running self-upgrade..."
+    "$opencode_bin" upgrade 2>&1 || true
   else
-    echo "  [ERROR] Could not fetch latest release"
+    echo "  [ERROR] opencode not found"
   fi
 
   echo ""
