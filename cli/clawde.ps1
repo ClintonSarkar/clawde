@@ -89,6 +89,13 @@ function Find-Binary($name) {
     # Check clawde bin dir first
     $localPath = Join-Path $BinDir $name
     if (Test-Path $localPath) { return $localPath }
+    # Fall back to a .cmd shim with the same basename (used when ccproxy.exe
+    # was replaced by a pipx-installed wrapper, see Install-CCProxyViaPipx in
+    # install.ps1).
+    if ($name.EndsWith('.exe')) {
+        $cmdLocal = Join-Path $BinDir ($name.Substring(0, $name.Length - 4) + '.cmd')
+        if (Test-Path $cmdLocal) { return $cmdLocal }
+    }
     # Fall back to PATH
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if ($cmd) { return $cmd.Source }
@@ -128,11 +135,20 @@ function Cmd-Start($extraArgs) {
         $ccproxyExe = Find-Binary "ccproxy.exe"
         $logFile = Join-Path $LogDir "ccproxy.log"
         $errFile = Join-Path $LogDir "ccproxy.err"
-        $proc = Start-Process -FilePath $ccproxyExe `
-            -ArgumentList "serve", "--port", $port `
-            -RedirectStandardOutput $logFile `
-            -RedirectStandardError $errFile `
-            -NoNewWindow -PassThru
+        if ($ccproxyExe.EndsWith('.cmd')) {
+            # Shim to a pipx-installed ccproxy; route through cmd.exe.
+            $proc = Start-Process -FilePath "cmd.exe" `
+                -ArgumentList "/c", $ccproxyExe, "serve", "--port", $port `
+                -RedirectStandardOutput $logFile `
+                -RedirectStandardError $errFile `
+                -NoNewWindow -PassThru
+        } else {
+            $proc = Start-Process -FilePath $ccproxyExe `
+                -ArgumentList "serve", "--port", $port `
+                -RedirectStandardOutput $logFile `
+                -RedirectStandardError $errFile `
+                -NoNewWindow -PassThru
+        }
         Write-Pid-File "proxy" $proc.Id
 
         # Wait for health
