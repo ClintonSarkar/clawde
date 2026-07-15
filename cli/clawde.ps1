@@ -281,12 +281,19 @@ function Cmd-Update {
     if ($ccproxyExe) {
         # Suppress stderr (config_file_missing warning)
         $ver = (& $ccproxyExe --version 2>$null)
-        # Parse out just the version number, strip ANSI and noise
+        # Strip ANSI escape codes and extract version number (e.g. "ccproxy 0.2.10")
         $verClean = ($ver -replace '\x1b\[[0-9;]*m', '' -replace '\s+', ' ').Trim()
+        # Match "ccproxy X.Y.Z" pattern at end of output
+        if ($verClean -match 'ccproxy\s+(\d+\.\d+\.\d+)') {
+            $currentVer = $Matches[1]
+        } elseif ($verClean -match '(\d+\.\d+\.\d+)') {
+            $currentVer = $Matches[1]
+        } else {
+            $currentVer = $verClean
+        }
         try {
             $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" -TimeoutSec 15
             $latestTag = $release.tag_name
-            $currentVer = ($verClean -replace '.*version\s*', '' -replace '\s.*', '').Trim()
             if ($latestTag -ne "v$currentVer") {
                 Write-Host "  [INFO] CCProxy  $currentVer -> $latestTag" -ForegroundColor Yellow
                 $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "i686" }
@@ -296,11 +303,21 @@ function Cmd-Update {
                     $zipPath = Join-Path $env:TEMP "ccproxy-update.zip"
                     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
                     $binDir = Split-Path $ccproxyExe
-                    # Stop running ccproxy before overwriting
+                    # Stop running ccproxy before overwriting (check PID file AND process name)
                     $ccproxyProcId = Get-Pid-File "proxy"
                     if ($ccproxyProcId -and (Test-ProcessRunning $ccproxyProcId)) {
-                        Write-Host "  [INFO] Stopping CCProxy for update..." -ForegroundColor Yellow
+                        Write-Host "  [INFO] Stopping CCProxy (PID $ccproxyProcId) for update..." -ForegroundColor Yellow
                         Stop-Process -Id $ccproxyProcId -Force -ErrorAction SilentlyContinue
+                        Remove-Pid-File "proxy"
+                        Start-Sleep -Milliseconds 500
+                    }
+                    # Also check by process name (PID file may be stale)
+                    $runningProcs = Get-Process -Name ccproxy -ErrorAction SilentlyContinue
+                    if ($runningProcs) {
+                        foreach ($p in $runningProcs) {
+                            Write-Host "  [INFO] Stopping CCProxy (PID $($p.Id)) for update..." -ForegroundColor Yellow
+                            Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+                        }
                         Remove-Pid-File "proxy"
                         Start-Sleep -Milliseconds 500
                     }
