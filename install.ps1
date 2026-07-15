@@ -791,7 +791,6 @@ function Setup-Service {
     if (-not $ccproxyPath) {
         Write-Warn "ccproxy not found in PATH " trying common locations..."
         $candidates = @(
-            Join-Path $env:LOCALAPPDATA "pipx\venvs\ccproxy-api\Scripts\ccproxy.exe"
             Join-Path $env:LOCALAPPDATA "clawde\bin\ccproxy.exe"
             Join-Path $env:USERPROFILE ".local\bin\ccproxy.exe"
         )
@@ -932,19 +931,26 @@ function Uninstall-Clawde {
         Write-Warn "  You can remove it manually: Unregister-ScheduledTask -TaskName '$($Script:TASK_NAME)' -Confirm:`$false"
     }
 
-    # --- Uninstall CCProxy (best-effort via all known package managers) ---
+    # --- Uninstall CCProxy (remove binary + legacy pip/uv/pipx if present) ---
+    # Remove binary install
+    $ccproxyExe = Join-Path $Script:CLAWDE_BIN_DIR "ccproxy.exe"
+    if (Test-Path $ccproxyExe) {
+        Remove-Item $ccproxyExe -Force
+        Write-OK "Removed ccproxy.exe"
+        $removedAnything = $true
+    }
+    # Legacy cleanup: if someone installed via pip/uv/pipx before binary install
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         $output = uv tool uninstall $Script:CCPROXY_PACKAGE 2>&1
-        if ($LASTEXITCODE -eq 0) { Write-OK "Uninstalled CCProxy via uv"; $removedAnything = $true }
+        if ($LASTEXITCODE -eq 0) { Write-OK "Removed legacy CCProxy via uv"; $removedAnything = $true }
     }
     if (Get-Command pipx -ErrorAction SilentlyContinue) {
         $output = pipx uninstall $Script:CCPROXY_PACKAGE 2>&1
-        if ($LASTEXITCODE -eq 0) { Write-OK "Uninstalled CCProxy via pipx"; $removedAnything = $true }
+        if ($LASTEXITCODE -eq 0) { Write-OK "Removed legacy CCProxy via pipx"; $removedAnything = $true }
     }
-    # pip uninstall
     if (Get-Command python -ErrorAction SilentlyContinue) {
         $output = python -m pip uninstall -y $Script:CCPROXY_PACKAGE 2>&1
-        if ($LASTEXITCODE -eq 0) { Write-OK "Uninstalled CCProxy via pip"; $removedAnything = $true }
+        if ($LASTEXITCODE -eq 0) { Write-OK "Removed legacy CCProxy via pip"; $removedAnything = $true }
     }
 
     if (-not $removedAnything) {

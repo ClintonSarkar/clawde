@@ -995,24 +995,32 @@ uninstall() {
     fi
   done
 
-  # --- Uninstall CCProxy (best-effort via all known package managers) ---
+  # --- Uninstall CCProxy (remove binary + legacy pip/uv/pipx if present) ---
+  # Remove binary install
+  local ccproxy_exe="${CLAWDE_BIN_DIR}/ccproxy"
+  if [[ -x "$ccproxy_exe" ]]; then
+    rm -f "$ccproxy_exe"
+    ok "Removed ccproxy binary"
+    removed_anything=true
+  fi
+  # Legacy cleanup: if someone installed via pip/uv/pipx before binary install
   if command -v uv >/dev/null 2>&1; then
     if uv tool uninstall "$CCPROXY_PACKAGE" 2>/dev/null; then
-      ok "Uninstalled CCProxy via uv"; removed_anything=true
+      ok "Removed legacy CCProxy via uv"; removed_anything=true
     fi
   fi
   if command -v pipx >/dev/null 2>&1; then
     if pipx uninstall "$CCPROXY_PACKAGE" 2>/dev/null; then
-      ok "Uninstalled CCProxy via pipx"; removed_anything=true
+      ok "Removed legacy CCProxy via pipx"; removed_anything=true
     fi
   fi
-  # pip --user uninstall (best-effort, no error shown on failure)
   local pip_cmd=""
   command -v pip3 >/dev/null 2>&1 && pip_cmd="pip3" || command -v pip >/dev/null 2>&1 && pip_cmd="pip" || true
   if [[ -n "$pip_cmd" ]]; then
     if $pip_cmd uninstall -y "$CCPROXY_PACKAGE" 2>/dev/null; then
-      ok "Uninstalled CCProxy via ${pip_cmd}"; removed_anything=true
+      ok "Removed legacy CCProxy via ${pip_cmd}"; removed_anything=true
     fi
+  fi
   fi
 
   if ! $removed_anything; then
