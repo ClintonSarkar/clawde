@@ -232,78 +232,104 @@ cmd_auth() {
 }
 
 cmd_update() {
-  echo "[INFO] Updating OpenCode..."
+  echo "[INFO] Updating all components..."
+  echo ""
+  local any_errors=false
+
+  # --- OpenCode ---
   local opencode_bin
-  opencode_bin="$(find_binary opencode)"
+  opencode_bin="$(find_binary opencode 2>/dev/null || true)"
   if [[ -x "$opencode_bin" ]]; then
     local ver
     ver="$("$opencode_bin" --version 2>/dev/null || echo "unknown")"
-    echo "  Current: $ver"
-    echo "  Running self-upgrade..."
-    "$opencode_bin" upgrade 2>&1 || true
+    local upgrade_output
+    upgrade_output="$("$opencode_bin" upgrade 2>&1 || true)"
+    local new_ver
+    new_ver="$("$opencode_bin" --version 2>/dev/null || echo "unknown")"
+    if [[ "$ver" != "$new_ver" ]]; then
+      echo "  [OK] OpenCode  $ver -> $new_ver"
+    else
+      echo "  [OK] OpenCode  $ver (already latest)"
+    fi
   else
     echo "  [ERROR] opencode not found"
+    any_errors=true
   fi
 
-  echo ""
-  echo "[INFO] Updating CCProxy..."
+  # --- CCProxy ---
   local ccproxy_bin
   ccproxy_bin="$(find_binary ccproxy 2>/dev/null || true)"
   if [[ -n "$ccproxy_bin" && -x "$ccproxy_bin" ]]; then
     local ver
     ver="$("$ccproxy_bin" --version 2>/dev/null || echo "unknown")"
-    echo "  Current: $ver"
-    # Check for newer release
     local release_json latest_tag
     release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" 2>/dev/null)" || {
-      echo "  [ERROR] Could not check for updates"
-      echo ""
-      echo "[OK] Update complete"
-      return
+      echo "  [ERROR] Could not check CCProxy updates"
+      any_errors=true
     }
-    latest_tag="$(echo "$release_json" | grep "\"tag_name\"" | head -1 | sed -E "s/.*\"([^\"]+)\".*/\1/")"
-    echo "  Latest:  $latest_tag"
-    # Determine platform asset
-    local arch asset_name
-    arch="$(uname -m)"
-    case "$(uname -s):${arch}" in
-      Linux:x86_64)   asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
-      Linux:aarch64)  asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
-      Darwin:x86_64)  asset_name="ccproxy-${latest_tag}-x86_64-apple-darwin.tar.gz" ;;
-      Darwin:arm64|Darwin:aarch64) asset_name="ccproxy-${latest_tag}-aarch64-apple-darwin.tar.gz" ;;
-      *) echo "  [ERROR] Unsupported platform"; echo ""; echo "[OK] Update complete"; return ;;
-    esac
-    local download_url
-    download_url="$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_name}[^\"]*\"" | sed -E "s/.*\"([^\"]+)\".*/\1/" | head -1)"
-    if [[ -z "$download_url" ]]; then
-      echo "  [WARN] No binary found for $latest_tag"
-    else
-      local tmp_archive="/tmp/ccproxy-update.tar.gz"
-      local bin_dir="$(dirname "$ccproxy_bin")"
-      if curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$tmp_archive" 2>/dev/null; then
-        tar -xzf "$tmp_archive" -C "$bin_dir" 2>/dev/null
-        if [[ ! -x "$ccproxy_bin" ]]; then
-          local found="$(find "$bin_dir" -name ccproxy -type f -executable | head -1)"
-          if [[ -n "$found" ]]; then mv "$found" "$ccproxy_bin"; chmod +x "$ccproxy_bin"; fi
+    if [[ -n "$release_json" ]]; then
+      latest_tag="$(echo "$release_json" | grep "\"tag_name\"" | head -1 | sed -E "s/.*\"([^\"]+)\".*/\1/")"
+      local current_ver
+      current_ver="$(echo "$ver" | sed -E 's/.*version[[:space:]]*//' | sed -E 's/[[:space:]].*//' | tr -d '[:space:]')"
+      if [[ "v${current_ver}" != "$latest_tag" ]]; then
+        echo "  [INFO] CCProxy  v${current_ver} -> $latest_tag"
+        local arch asset_name
+        arch="$(uname -m)"
+        case "$(uname -s):${arch}" in
+          Linux:x86_64)   asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
+          Linux:aarch64)  asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
+          Darwin:x86_64)  asset_name="ccproxy-${latest_tag}-x86_64-apple-darwin.tar.gz" ;;
+          Darwin:arm64|Darwin:aarch64) asset_name="ccproxy-${latest_tag}-aarch64-apple-darwin.tar.gz" ;;
+          *) echo "  [ERROR] Unsupported platform"; any_errors=true ;;
+        esac
+        local download_url
+        download_url="$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_name}[^\"]*\"" | sed -E "s/.*\"([^\"]+)\".*/\1/" | head -1)"
+        if [[ -n "$download_url" ]]; then
+          local tmp_archive="/tmp/ccproxy-update.tar.gz"
+          local bin_dir="$(dirname "$ccproxy_bin")"
+          # Stop running ccproxy before overwriting
+          local proxy_pid="$(get_pid proxy)"
+          if [[ -n "$proxy_pid" ]] && is_running "$proxy_pid"; then
+            kill "$proxy_pid" 2>/dev/null || true
+            remove_pid proxy
+            sleep 0.5
+          fi
+          if curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$tmp_archive" 2>/dev/null; then
+            tar -xzf "$tmp_archive" -C "$bin_dir" 2>/dev/null
+            if [[ ! -x "$ccproxy_bin" ]]; then
+              local found="$(find "$bin_dir" -name ccproxy -type f -executable | head -1)"
+              if [[ -n "$found" ]]; then mv "$found" "$ccproxy_bin"; chmod +x "$ccproxy_bin"; fi
+            fi
+            rm -f "$tmp_archive"
+            echo "  [OK] CCProxy  updated to $latest_tag"
+          else
+            echo "  [ERROR] CCProxy download failed"
+            any_errors=true
+          fi
+        else
+          echo "  [WARN] No binary found for $latest_tag"
         fi
-        rm -f "$tmp_archive"
-        echo "  [OK] CCProxy updated"
       else
-        echo "  [ERROR] Download failed"
+        echo "  [OK] CCProxy  v${current_ver} (already latest)"
       fi
     fi
   else
-    echo "  [ERROR] ccproxy not found - run installer first"
+    echo "  [ERROR] ccproxy not found - run installer"
+    any_errors=true
   fi
 
-  echo ""
+  # --- Self-update ---
   self_update
-  echo "[OK] Update complete"
+
+  echo ""
+  if $any_errors; then
+    echo "[WARN] Update completed with errors"
+  else
+    echo "[OK] Update complete"
+  fi
 }
 
 self_update() {
-  echo "[INFO] Checking for clawde CLI updates..."
-
   local self_url="https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.sh"
   local this_script
   this_script="$(realpath "$0" 2>/dev/null || readlink -f "$0" 2>/dev/null || echo "$0")"
@@ -314,92 +340,23 @@ self_update() {
 
   local tmp_file="/tmp/clawde-update.sh"
   if curl -fsSL --connect-timeout 10 --max-time 30 "$self_url" -o "$tmp_file" 2>/dev/null; then
-    local current_hash new_hash
-    current_hash="$(sha256sum "$tmp_file" 2>/dev/null | awk '{print $1}')"
-    new_hash="$(sha256sum "$this_script" 2>/dev/null | awk '{print $1}')"
+    local remote_hash local_hash
+    remote_hash="$(sha256sum "$tmp_file" 2>/dev/null | awk '{print $1}')"
+    local_hash="$(sha256sum "$this_script" 2>/dev/null | awk '{print $1}')"
 
-    if [[ "$current_hash" == "$new_hash" ]]; then
-      echo "  clawde CLI is up to date"
+    if [[ "$remote_hash" == "$local_hash" ]]; then
+      echo "  [OK] clawde CLI (already latest)"
       rm -f "$tmp_file"
-      return
-    fi
-
-    echo "  Updating clawde CLI..."
-    cp "$this_script" "${this_script}.bak"
-    cp "$tmp_file" "$this_script"
-    rm -f "$tmp_file"
-    chmod +x "$this_script"
-    echo "  [OK] clawde CLI updated (backup saved as ${this_script}.bak)"
-  else
-    echo "  [WARN] Could not download clawde CLI update"
-    echo "  You can update manually: curl -fsSL $self_url -o $this_script"
-  fi
-}
-
-cmd_logs() {
-  local opencode_bin
-  opencode_bin="$(find_binary opencode)"
-  if [[ -x "$opencode_bin" ]]; then
-    local ver
-    ver="$("$opencode_bin" --version 2>/dev/null || echo "unknown")"
-    echo "  Current: $ver"
-    echo "  Running self-upgrade..."
-    "$opencode_bin" upgrade 2>&1 || true
-  else
-    echo "  [ERROR] opencode not found"
-  fi
-
-  echo ""
-  echo "[INFO] Updating CCProxy..."
-  local ccproxy_bin
-  ccproxy_bin="$(find_binary ccproxy 2>/dev/null || true)"
-  if [[ -n "$ccproxy_bin" && -x "$ccproxy_bin" ]]; then
-    local ver
-    ver="$("$ccproxy_bin" --version 2>/dev/null || echo "unknown")"
-    echo "  Current: $ver"
-    local release_json latest_tag
-    release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" 2>/dev/null)" || {
-      echo "  [ERROR] Could not check for updates"
-      echo ""
-      echo "[OK] Update complete"
-      return
-    }
-    latest_tag="$(echo "$release_json" | grep "\"tag_name\"" | head -1 | sed -E "s/.*\"([^\"]+)\".*/\1/")"
-    echo "  Latest:  $latest_tag"
-    local arch asset_name
-    arch="$(uname -m)"
-    case "$(uname -s):${arch}" in
-      Linux:x86_64)   asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
-      Linux:aarch64)  asset_name="ccproxy-${latest_tag}-x86_64-unknown-linux-gnu.tar.gz" ;;
-      Darwin:x86_64)  asset_name="ccproxy-${latest_tag}-x86_64-apple-darwin.tar.gz" ;;
-      Darwin:arm64|Darwin:aarch64) asset_name="ccproxy-${latest_tag}-aarch64-apple-darwin.tar.gz" ;;
-      *) echo "  [ERROR] Unsupported platform"; echo ""; echo "[OK] Update complete"; return ;;
-    esac
-    local download_url
-    download_url="$(echo "$release_json" | grep -o "\"browser_download_url\": *\"[^\"]*${asset_name}[^\"]*\"" | sed -E "s/.*\"([^\"]+)\".*/\1/" | head -1)"
-    if [[ -z "$download_url" ]]; then
-      echo "  [WARN] No binary found for $latest_tag"
     else
-      local tmp_archive="/tmp/ccproxy-update.tar.gz"
-      local bin_dir="$(dirname "$ccproxy_bin")"
-      if curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$tmp_archive" 2>/dev/null; then
-        tar -xzf "$tmp_archive" -C "$bin_dir" 2>/dev/null
-        if [[ ! -x "$ccproxy_bin" ]]; then
-          local found="$(find "$bin_dir" -name ccproxy -type f -executable | head -1)"
-          if [[ -n "$found" ]]; then mv "$found" "$ccproxy_bin"; chmod +x "$ccproxy_bin"; fi
-        fi
-        rm -f "$tmp_archive"
-        echo "  [OK] CCProxy updated"
-      else
-        echo "  [ERROR] Download failed"
-      fi
+      cp "$this_script" "${this_script}.bak"
+      cp "$tmp_file" "$this_script"
+      rm -f "$tmp_file"
+      chmod +x "$this_script"
+      echo "  [OK] clawde CLI updated (backup: ${this_script}.bak)"
     fi
   else
-    echo "  [ERROR] ccproxy not found - run installer first"
+    echo "  [WARN] clawde CLI not updated"
   fi
-
-  echo ""
-  echo "[OK] Update complete"
 }
 
 cmd_logs() {

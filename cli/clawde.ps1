@@ -246,33 +246,49 @@ function Cmd-Auth {
 }
 
 function Cmd-Update {
-    Write-Host "[INFO] Updating OpenCode..." -ForegroundColor Cyan
+    Write-Host "[INFO] Updating all components...`n" -ForegroundColor Cyan
+    $anyErrors = $false
 
+    # --- OpenCode ---
     $opencodeExe = Find-Binary "opencode.exe"
     if ($opencodeExe) {
-        $ver = & $opencodeExe --version 2>&1
-        Write-Host "  Current: $ver"
-        Write-Host "  Running self-upgrade..."
-        & $opencodeExe upgrade 2>&1
+        $ver = (& $opencodeExe --version 2>$null) -replace '\s+', ' '
+        $ver = $ver.Trim()
+        # Suppress upgrade noise: capture output, only show on failure
+        $upgradeOutput = & $opencodeExe upgrade 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            $newVer = (& $opencodeExe --version 2>$null) -replace '\s+', ' '
+            $newVer = $newVer.Trim()
+            if ($ver -ne $newVer) {
+                Write-Host "  [OK] OpenCode  $ver -> $newVer" -ForegroundColor Green
+            } else {
+                Write-Host "  [OK] OpenCode  $ver (already latest)" -ForegroundColor Green
+            }
+        } else {
+            Write-Host "  [ERROR] OpenCode upgrade failed" -ForegroundColor Red
+            # Show last few lines of output for debugging
+            $lines = $upgradeOutput -split "`n" | Where-Object { $_.Trim() } | Select-Object -Last 3
+            foreach ($l in $lines) { Write-Host "         $l" -ForegroundColor Gray }
+            $anyErrors = $true
+        }
     } else {
         Write-Host "  [ERROR] opencode not found" -ForegroundColor Red
+        $anyErrors = $true
     }
 
-Write-Host ""
-    Write-Host "[INFO] Updating CCProxy..." -ForegroundColor Cyan
-
+    # --- CCProxy ---
     $ccproxyExe = Find-Binary "ccproxy.exe"
     if ($ccproxyExe) {
-        $ver = & $ccproxyExe --version 2>&1
-        Write-Host "  Current: $ver"
-        # Check for newer release
+        # Suppress stderr (config_file_missing warning)
+        $ver = (& $ccproxyExe --version 2>$null)
+        # Parse out just the version number, strip ANSI and noise
+        $verClean = ($ver -replace '\x1b\[[0-9;]*m', '' -replace '\s+', ' ').Trim()
         try {
             $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" -TimeoutSec 15
             $latestTag = $release.tag_name
-            $currentVer = ($ver -replace ".*version\s*", "" -replace "\s.*", "").Trim()
+            $currentVer = ($verClean -replace '.*version\s*', '' -replace '\s.*', '').Trim()
             if ($latestTag -ne "v$currentVer") {
-                Write-Host "  Latest:  $latestTag"
-                Write-Host "  Downloading update..."
+                Write-Host "  [INFO] CCProxy  $currentVer -> $latestTag" -ForegroundColor Yellow
                 $arch = if ([Environment]::Is64BitOperatingSystem) { "x86_64" } else { "i686" }
                 $assetName = "ccproxy-${latestTag}-${arch}-pc-windows-msvc.zip"
                 $asset = $release.assets | Where-Object { $_.name -eq $assetName } | Select-Object -First 1
@@ -280,35 +296,59 @@ Write-Host ""
                     $zipPath = Join-Path $env:TEMP "ccproxy-update.zip"
                     Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $zipPath -UseBasicParsing -TimeoutSec 60
                     $binDir = Split-Path $ccproxyExe
-                    Expand-Archive -Path $zipPath -DestinationPath $binDir -Force
-                    $extractedExe = Join-Path $binDir "ccproxy.exe"
-                    if (-not (Test-Path $extractedExe)) {
-                        $found = Get-ChildItem $binDir -Recurse -Filter "ccproxy.exe" | Select-Object -First 1
-                        if ($found) { Move-Item $found.FullName $extractedExe -Force }
+                    # Stop running ccproxy before overwriting
+                    $ccproxyProcId = Get-Pid-File "proxy"
+                    if ($ccproxyProcId -and (Test-ProcessRunning $ccproxyProcId)) {
+                        Write-Host "  [INFO] Stopping CCProxy for update..." -ForegroundColor Yellow
+                        Stop-Process -Id $ccproxyProcId -Force -ErrorAction SilentlyContinue
+                        Remove-Pid-File "proxy"
+                        Start-Sleep -Milliseconds 500
                     }
-                    Remove-Item $zipPath -Force
-                    Write-Host "  [OK] CCProxy updated" -ForegroundColor Green
+                    # Extract to temp dir first, then move (avoids Expand-Archive delete issues)
+                    $extractDir = Join-Path $env:TEMP "ccproxy-extract"
+                    if (Test-Path $extractDir) { Remove-Item $extractDir -Recurse -Force }
+                    Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+                    $extractedExe = Join-Path $extractDir "ccproxy.exe"
+                    if (-not (Test-Path $extractedExe)) {
+                        $found = Get-ChildItem $extractDir -Recurse -Filter "ccproxy.exe" | Select-Object -First 1
+                        if ($found) { $extractedExe = $found.FullName }
+                    }
+                    if (Test-Path $extractedExe) {
+                        Copy-Item $extractedExe $ccproxyExe -Force
+                        Write-Host "  [OK] CCProxy  updated to $latestTag" -ForegroundColor Green
+                    } else {
+                        Write-Host "  [ERROR] ccproxy.exe not found after extraction" -ForegroundColor Red
+                        $anyErrors = $true
+                    }
+                    Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+                    Remove-Item $extractDir -Recurse -Force -ErrorAction SilentlyContinue
                 } else {
                     Write-Host "  [WARN] No binary found for $latestTag" -ForegroundColor Yellow
                 }
             } else {
-                Write-Host "  Already up to date"
+                Write-Host "  [OK] CCProxy  v$currentVer (already latest)" -ForegroundColor Green
             }
         } catch {
-            Write-Host "  [ERROR] Could not check for updates: $_" -ForegroundColor Red
+            Write-Host "  [ERROR] Could not check CCProxy updates: $($_.Exception.Message)" -ForegroundColor Red
+            $anyErrors = $true
         }
     } else {
-        Write-Host "  [ERROR] ccproxy not found - run installer or clawde update --install" -ForegroundColor Red
+        Write-Host "  [ERROR] ccproxy not found - run installer" -ForegroundColor Red
+        $anyErrors = $true
     }
 
+    # --- Self-update clawde CLI ---
     Self-Update
 
-    Write-Host "`n[OK] Update complete" -ForegroundColor Green
+    Write-Host ""
+    if ($anyErrors) {
+        Write-Host "[WARN] Update completed with errors" -ForegroundColor Yellow
+    } else {
+        Write-Host "[OK] Update complete" -ForegroundColor Green
+    }
 }
 
 function Self-Update {
-    Write-Host "`n[INFO] Checking for clawde CLI updates..." -ForegroundColor Cyan
-
     $updateUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.ps1"
     $thisScript = $PSCommandPath
     if (-not $thisScript) { $thisScript = Join-Path $BinDir "clawde.ps1" }
@@ -322,37 +362,29 @@ function Self-Update {
         $newHash = (Get-FileHash $tmpFile -Algorithm SHA256).Hash
 
         if ($currentHash -eq $newHash) {
-            Write-Host "  clawde CLI is up to date" -ForegroundColor Green
+            Write-Host "  [OK] clawde CLI (already latest)" -ForegroundColor Green
             Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
-            return
+        } else {
+            Copy-Item $thisScript $backupPath -Force
+            Copy-Item $tmpFile $thisScript -Force
+            Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+            Write-Host "  [OK] clawde CLI updated (backup: $backupPath)" -ForegroundColor Green
+
+            # Also update .cmd shim
+            $clawdeCmdPath = Join-Path $BinDir "clawde.cmd"
+            $cmdUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.cmd"
+            $tmpCmd = Join-Path $env:TEMP "clawde-update.cmd"
+            try {
+                Invoke-WebRequest -Uri $cmdUrl -OutFile $tmpCmd -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
+                Copy-Item $tmpCmd $clawdeCmdPath -Force
+                Remove-Item $tmpCmd -Force -ErrorAction SilentlyContinue
+            } catch {
+                Write-Host "  [WARN] clawde.cmd not updated: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
         }
-
-        Write-Host "  Updating clawde CLI..." -ForegroundColor Yellow
-        Copy-Item $thisScript $backupPath -Force
-        Copy-Item $tmpFile $thisScript -Force
-        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] clawde CLI updated (backup saved as $backupPath)" -ForegroundColor Green
     }
     catch {
-        Write-Host "  [WARN] Could not update clawde CLI: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "  You can update manually: irm $updateUrl -o $thisScript" -ForegroundColor Gray
-    }
-
-    # Update .cmd shim
-    Write-Host "[INFO] Updating clawde.cmd shim..." -ForegroundColor Cyan
-    $clawdeCmdPath = Join-Path $BinDir "clawde.cmd"
-    try {
-        $cmdUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.cmd"
-        $tmpCmd = Join-Path $env:TEMP "clawde-update.cmd"
-        Invoke-WebRequest -Uri $cmdUrl -OutFile $tmpCmd -UseBasicParsing -TimeoutSec 15 -ErrorAction Stop
-        Copy-Item $tmpCmd $clawdeCmdPath -Force
-        Remove-Item $tmpCmd -Force -ErrorAction SilentlyContinue
-        Write-Host "  [OK] clawde.cmd updated" -ForegroundColor Green
-    }
-    catch {
-        Write-Host "  [WARN] Could not update clawde.cmd: $($_.Exception.Message)" -ForegroundColor Yellow
-        Write-Host "  You can update manually: irm $cmdUrl -o $clawdeCmdPath" -ForegroundColor Gray
-        Write-Host "  You can update manually: irm $updateUrl -o $thisScript" -ForegroundColor Gray
+        Write-Host "  [WARN] clawde CLI not updated: $($_.Exception.Message)" -ForegroundColor Yellow
     }
 }
 
