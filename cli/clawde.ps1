@@ -301,7 +301,42 @@ Write-Host ""
         Write-Host "  [ERROR] ccproxy not found - run installer or clawde update --install" -ForegroundColor Red
     }
 
+    Self-Update
+
     Write-Host "`n[OK] Update complete" -ForegroundColor Green
+}
+
+function Self-Update {
+    Write-Host "`n[INFO] Checking for clawde CLI updates..." -ForegroundColor Cyan
+
+    $updateUrl = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.ps1"
+    $thisScript = $PSCommandPath
+    if (-not $thisScript) { $thisScript = Join-Path $BinDir "clawde.ps1" }
+    $backupPath = $thisScript + ".bak"
+
+    try {
+        $tmpFile = Join-Path $env:TEMP "clawde-update.ps1"
+        Invoke-WebRequest -Uri $updateUrl -OutFile $tmpFile -UseBasicParsing -TimeoutSec 30 -ErrorAction Stop
+
+        $currentHash = (Get-FileHash $thisScript -Algorithm SHA256).Hash
+        $newHash = (Get-FileHash $tmpFile -Algorithm SHA256).Hash
+
+        if ($currentHash -eq $newHash) {
+            Write-Host "  clawde CLI is up to date" -ForegroundColor Green
+            Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+            return
+        }
+
+        Write-Host "  Updating clawde CLI..." -ForegroundColor Yellow
+        Copy-Item $thisScript $backupPath -Force
+        Copy-Item $tmpFile $thisScript -Force
+        Remove-Item $tmpFile -Force -ErrorAction SilentlyContinue
+        Write-Host "  [OK] clawde CLI updated (backup saved as $backupPath)" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  [WARN] Could not update clawde CLI: $($_.Exception.Message)" -ForegroundColor Yellow
+        Write-Host "  You can update manually: irm $updateUrl -o $thisScript" -ForegroundColor Gray
+    }
 }
 
 function Cmd-Logs($service, $follow, $lines) {
