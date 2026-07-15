@@ -40,6 +40,13 @@ clawde logs       # tail logs (clawde logs proxy -f)
 - **Windows:** PowerShell 5+, Python 3.10+, pip or uv
 - **Claude Work subscription** (or Claude Code Max)
 
+> **Note (Windows users):** The pre-built `ccproxy.exe` in upstream releases
+> currently ships without the Claude/Codex auth provider plugins (see
+> [CaddyGlow/ccproxy-api#75](https://github.com/CaddyGlow/ccproxy-api/issues/75)).
+> The `clawde` installer detects this and automatically falls back to installing
+> `ccproxy-api[plugins-claude,plugins-codex]` via `pipx` so `clawde auth` works
+> out of the box. If you want to do it manually: `pipx install "ccproxy-api[plugins-claude,plugins-codex]"`.
+
 ## How it works
 
 clawde is a deployment wrapper — it installs and configures two open-source tools:

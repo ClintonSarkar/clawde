@@ -629,6 +629,30 @@ function Install-CCProxy {
         } else {
             Write-Err "ccproxy.exe not found after extraction"
         }
+
+    # Post-install check: detect the upstream bug where the Windows binary ships
+    # without auth provider plugins (see CaddyGlow/ccproxy-api issue #75). If we
+    # find no providers, offer to swap the bare binary for a `pipx`-installed
+    # `ccproxy-api[plugins-claude,plugins-codex]` instead.
+    if (Test-Path $extractedExe) {
+        $hasProviders = Test-CCProxyHasProviders $extractedExe
+        if (-not $hasProviders) {
+            Write-Warn "CCProxy binary has no auth provider plugins (known upstream bug in v0.2.10 Windows build)."
+            Write-Warn "Upstream: https://github.com/CaddyGlow/ccproxy-api/issues/75"
+            if (Test-PipxAvailable) {
+                Write-Info "Replacing bare ccproxy.exe with a pipx-installed ccproxy-api[plugins-claude,plugins-codex]..."
+                $pipxPath = Install-CCProxyViaPipx
+                if ($pipxPath) {
+                    Set-StepDone "CCProxy installed via pipx (full plugin set)"
+                } else {
+                    Write-Warn "pipx install failed; you can retry later with: pipx install ccproxy-api[plugins-claude,plugins-codex]"
+                }
+            } else {
+                Write-Warn "Install Python 3.11+ and pipx, then run: pipx install ccproxy-api[plugins-claude,plugins-codex]"
+                Write-Warn "Then re-run this installer to wire it into the clawde bin dir."
+            }
+        }
+    }
     } catch {
         Write-Err "Failed to extract CCProxy: $($_.Exception.Message)"
     }
@@ -636,6 +660,109 @@ function Install-CCProxy {
     # Cleanup
     if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
     $Script:RollbackItems = $Script:RollbackItems | Where-Object { $_ -ne $zipPath }
+}
+
+# ====================================================================
+# CCProxy plugin fallback helpers (upstream Windows binary bug workaround)
+# See: https://github.com/CaddyGlow/ccproxy-api/issues/75
+# ====================================================================
+
+# Test whether a ccproxy binary has any auth provider plugins discoverable.
+# Returns $true if 'ccproxy auth providers' reports at least one provider,
+# $false if it returns "No OAuth providers found" or fails entirely.
+function Test-CCProxyHasProviders {
+    param([Parameter(Mandatory=$true)][string]$BinaryPath)
+    if (-not (Test-Path $BinaryPath)) { return $false }
+    try {
+        $out = & $BinaryPath auth providers 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { return $false }
+        # The ccproxy output is structured; look for at least one provider name
+        # (e.g. "oauth_claude", "claude_api"). An empty plugin list prints
+        # "No OAuth providers found" (case-insensitive).
+        if ($out -match 'No OAuth providers found') { return $false }
+        if ($out -match 'No plugins found') { return $false }
+        # Heuristic: real provider names are non-empty and don't include the
+        # word "warning" on a line by itself.
+        $hasProvider = $false
+        foreach ($line in ($out -split "`n")) {
+            $trim = $line.Trim()
+            if ($trim -and $trim -notmatch '^(Available|warning|Warning|Available OAuth Providers|providers found)$') {
+                $hasProvider = $true
+                break
+            }
+        }
+        return $hasProvider
+    } catch {
+        return $false
+    }
+}
+
+# Check if pipx is on PATH (and Python 3.11+ is available).
+function Test-PipxAvailable {
+    try {
+        $py = $null
+        $py = (Get-Command py -ErrorAction SilentlyContinue)
+        if (-not $py) { $py = (Get-Command python -ErrorAction SilentlyContinue) }
+        if (-not $py) { return $false }
+        # Quick version check: pipx requires Python 3.8+, and the ccproxy
+        # extras (claude-agent-sdk) require 3.11+.
+        $ver = & $py.Source --version 2>$null
+        if ($ver -match 'Python\s+(\d+)\.(\d+)') {
+            $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+            if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 11)) { return $false }
+        }
+        $pipx = (Get-Command pipx -ErrorAction SilentlyContinue)
+        return [bool]$pipx
+    } catch {
+        return $false
+    }
+}
+
+# Install ccproxy-api with full plugin set via pipx, then copy the resulting
+# entry-point script into the clawde bin dir as ccproxy.exe (Windows shim).
+# Returns the path to the new ccproxy shim, or $null on failure.
+function Install-CCProxyViaPipx {
+    $py = (Get-Command py -ErrorAction SilentlyContinue)
+    if (-not $py) { $py = (Get-Command python -ErrorAction SilentlyContinue) }
+    $pipx = (Get-Command pipx -ErrorAction SilentlyContinue)
+    if (-not $py -or -not $pipx) {
+        Write-Warn "Python 3.11+ and pipx are required for the fallback install"
+        return $null
+    }
+    try {
+        # Install (or upgrade) ccproxy-api with both plugin extras
+        & pipx install --python $py.Source "ccproxy-api[plugins-claude,plugins-codex]" 2>&1 | Out-String | Write-DebugMsg
+        if ($LASTEXITCODE -ne 0) {
+            # pipx returns non-zero on upgrade if already installed; try 'pipx upgrade' instead
+            & pipx upgrade ccproxy-api --python $py.Source 2>&1 | Out-String | Write-DebugMsg
+        }
+        # Find the pipx venv shim
+        $shim = (Get-Command ccproxy -ErrorAction SilentlyContinue)
+        if (-not $shim) {
+            Write-Warn "pipx install succeeded but 'ccproxy' is not on PATH"
+            return $null
+        }
+        # Replace the bare ccproxy.exe with a Windows shim that delegates to
+        # the pipx-installed script. Using a .cmd shim avoids needing to
+        # copy/symlink the actual binary.
+        $ccproxyExe = Join-Path $Script:CLAWDE_BIN_DIR "ccproxy.exe"
+        $shimCmd = Join-Path $Script:CLAWDE_BIN_DIR "ccproxy.cmd"
+        # Remove the broken binary
+        if (Test-Path $ccproxyExe) { Remove-Item $ccproxyExe -Force }
+        # Write a tiny .cmd shim that forwards to the pipx shim
+        $shimContent = @"
+@echo off
+"%~dp0..\..\Python\Scripts\ccproxy.exe" %*
+"@
+        # Fall back to using the resolved pipx path directly
+        $shimPath = $shim.Source
+        $shimContent = "@echo off`r`n`"$shimPath`" %*`r`n"
+        Set-Content -Path $shimCmd -Value $shimContent -Encoding ASCII -Force
+        return $shimCmd
+    } catch {
+        Write-Warn "pipx install failed: $($_.Exception.Message)"
+        return $null
+    }
 }
 
 # ====================================================================
