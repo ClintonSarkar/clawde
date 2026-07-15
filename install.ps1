@@ -519,7 +519,7 @@ function Install-CCProxy {
     # Fetch latest release info from upstream
     Write-DebugMsg "Fetching latest CCProxy release..."
     try {
-        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" -TimeoutSec 15
+        $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" -TimeoutSec 15
         $tagName = $release.tag_name
         Write-DebugMsg "Latest CCProxy release: $tagName"
     } catch {

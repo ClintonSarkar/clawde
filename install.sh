@@ -601,7 +601,7 @@ install_ccproxy() {
   debug "Fetching latest CCProxy release..."
   local release_json
   release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 \
-    "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" 2>/dev/null)" || {
+    "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" 2>/dev/null)" || {
     warn "Failed to fetch CCProxy release info"
     return
   }

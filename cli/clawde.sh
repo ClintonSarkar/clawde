@@ -255,7 +255,7 @@ cmd_update() {
     echo "  Current: $ver"
     # Check for newer release
     local release_json latest_tag
-    release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" 2>/dev/null)" || {
+    release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" 2>/dev/null)" || {
       echo "  [ERROR] Could not check for updates"
       echo ""
       echo "[OK] Update complete"

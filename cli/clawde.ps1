@@ -267,7 +267,7 @@ Write-Host ""
         Write-Host "  Current: $ver"
         # Check for newer release
         try {
-            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/caddyglow/ccproxy-api/releases/latest" -TimeoutSec 15
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" -TimeoutSec 15
             $latestTag = $release.tag_name
             $currentVer = ($ver -replace ".*version\s*", "" -replace "\s.*", "").Trim()
             if ($latestTag -ne "v$currentVer") {
