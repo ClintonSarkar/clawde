@@ -1,12 +1,12 @@
-﻿# clawde installer " Windows (PowerShell 5+)
-#   Claude Work ' OpenCode bridge
+﻿# clawde installer - Windows (PowerShell 5+)
+#   Claude Work - OpenCode bridge
 #
 # Quick install (run as Administrator):
 #   irm https://clawde.dev/install.ps1 | iex
 #
 # With options:
-#   irm https://clawde.dev/install.ps1 | iex " -Yes -Verbose"
-#   irm https://clawde.dev/install.ps1 | iex " -Uninstall"
+#   irm https://clawde.dev/install.ps1 | iex -Yes -Verbose
+#   irm https://clawde.dev/install.ps1 | iex -Uninstall
 #
 # Environment variables (for CI / automation):
 #   CLAWDE_PORT         Proxy port (default: 8080)
@@ -74,7 +74,7 @@ function Show-Help {
     @"
 Usage: install.ps1 [OPTIONS]
 
-Install clawde " the Claude Work to OpenCode bridge.
+Install clawde - the Claude Work to OpenCode bridge.
 
 Options:
   -Yes          Non-interactive mode; accept all defaults
@@ -116,7 +116,7 @@ function Invoke-Rollback {
     if ($Script:RollbackItems.Count -eq 0) { return }
 
     Write-Host ""
-    Write-Warn "Installation did not complete " rolling back..."
+    Write-Warn "Installation did not complete - rolling back..."
     foreach ($item in $Script:RollbackItems) {
         if (Test-Path -LiteralPath $item -PathType Leaf) {
             Remove-Item -LiteralPath $item -Force -ErrorAction SilentlyContinue
@@ -142,12 +142,12 @@ Register-EngineEvent -SourceIdentifier PowerShell.Exiting -SupportEvent -Action 
 # Banner
 # ====================================================================
 function Show-Banner {
-    Write-Host ""
-    Write-Host "  ""
-    Write-Host "  '         clawde installer v$($Script:CLAWDE_VERSION)          '"
-    Write-Host "  '  Claude Work -> OpenCode bridge       '"
-    Write-Host "  "
-    Write-Host ""
+    Write-Host "  +--------------------------------------+"
+    Write-Host "  |                                      |"
+    Write-Host "  |         clawde installer v$($Script:CLAWDE_VERSION)          |"
+    Write-Host "  |  Claude Work -> OpenCode bridge      |"
+    Write-Host "  |                                      |"
+    Write-Host "  +--------------------------------------+"
 }
 
 # ====================================================================
@@ -159,7 +159,7 @@ function Detect-Arch {
         "AMD64"     { return "x64" }
         "ARM64"     { return "arm64" }
         default {
-            Write-Warn "Unrecognized architecture: $arch " assuming x64 (may cause runtime issues)"
+            Write-Warn "Unrecognized architecture: $arch - assuming x64 (may cause runtime issues)"
             return "x64"
         }
     }
@@ -286,11 +286,11 @@ function Check-Existing {
 
     if ($Script:Yes) {
         if ($Script:ExistingOpenCodePath) {
-            Write-Info "OpenCode found in PATH at: $($Script:ExistingOpenCodePath) " using existing binary"
+            Write-Info "OpenCode found in PATH at: $($Script:ExistingOpenCodePath) - using existing binary"
             $Script:SkipOpenCode = $true
         }
         else {
-            Write-Warn "Non-interactive mode " reinstalling OpenCode and overwriting config"
+            Write-Warn "Non-interactive mode - reinstalling OpenCode and overwriting config"
             if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
         }
         return
@@ -310,11 +310,11 @@ function Check-Existing {
         "1" { Write-DebugMsg "User chose reinstall" }
         "R*" { Write-DebugMsg "User chose reinstall" }
         ""  { Write-DebugMsg "User chose reinstall" }
-        "2" { Write-Info "Keeping existing installation " skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
-        "S*" { Write-Info "Keeping existing installation " skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
+        "2" { Write-Info "Keeping existing installation - skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
+        "S*" { Write-Info "Keeping existing installation - skipping OpenCode and config"; $Script:SkipOpenCode = $true; $Script:SkipConfig = $true; return }
         "3" {
             if (-not $Script:ExistingOpenCodePath) {
-                Write-Warn "No existing OpenCode found in PATH " defaulting to reinstall"
+                Write-Warn "No existing OpenCode found in PATH - defaulting to reinstall"
                 if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
             }
             else {
@@ -324,7 +324,7 @@ function Check-Existing {
         }
         "U*" {
             if (-not $Script:ExistingOpenCodePath) {
-                Write-Warn "No existing OpenCode found in PATH " defaulting to reinstall"
+                Write-Warn "No existing OpenCode found in PATH - defaulting to reinstall"
                 if ($haveOpenCode) { Remove-Item -LiteralPath $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
             }
             else {
@@ -363,7 +363,7 @@ function Setup-Path {
 
     # If existing OpenCode is already in PATH, skip PATH management
     if ($Script:ExistingOpenCodePath -and (Get-Command opencode -ErrorAction SilentlyContinue)) {
-        Write-DebugMsg "Existing OpenCode already in PATH " skipping PATH management for binary dir"
+        Write-DebugMsg "Existing OpenCode already in PATH - skipping PATH management for binary dir"
         return
     }
 
@@ -620,7 +620,7 @@ function Do-InteractiveConfig {
 
     Write-Host ""
     Write-Host "  Choose authentication method:"
-    Write-Host "    1. OAuth login (opens browser " recommended)"
+    Write-Host "    1. OAuth login (opens browser - recommended)"
     Write-Host "    2. Use existing Claude CLI token"
     Write-Host ""
 
@@ -779,7 +779,7 @@ function Setup-Service {
     }
 
     if (-not $autoStart) {
-        Write-OK "Auto-start disabled " use 'clawde start' to launch manually"
+        Write-OK "Auto-start disabled - use" 'clawde start' to launch manually"
         return
     }
 
@@ -789,7 +789,7 @@ function Setup-Service {
     # Look for ccproxy in PATH
     $ccproxyPath = (Get-Command ccproxy -ErrorAction SilentlyContinue).Source
     if (-not $ccproxyPath) {
-        Write-Warn "ccproxy not found in PATH " trying common locations..."
+        Write-Warn "ccproxy not found in PATH - trying common locations..."
         $candidates = @(
             Join-Path $env:LOCALAPPDATA "clawde\bin\ccproxy.exe"
             Join-Path $env:USERPROFILE ".local\bin\ccproxy.exe"
@@ -852,15 +852,15 @@ function Final-Message {
     Write-OK "clawde v$($Script:CLAWDE_VERSION) is installed and ready!"
     Write-Host ""
     Write-Host "  Quick start:"
-    Write-Host "    clawde start     " launch proxy + OpenCode"
-    Write-Host "    clawde stop      " stop all services"
-    Write-Host "    clawde status    " check health"
+    Write-Host "    clawde start     - launch proxy + OpenCode"
+    Write-Host "    clawde stop      - stop all services"
+    Write-Host "    clawde status    - check health"
     Write-Host ""
     Write-Host "  Management:"
-    Write-Host "    clawde config    " reconfigure"
-    Write-Host "    clawde auth      " re-authenticate Claude"
-    Write-Host "    clawde update    " update to latest version"
-    Write-Host "    clawde logs      " tail logs"
+    Write-Host "    clawde config    - reconfigure"
+    Write-Host "    clawde auth      - re-authenticate Claude"
+    Write-Host "    clawde update    - update to latest version"
+    Write-Host "    clawde logs      - tail logs"
     Write-Host ""
     if ($Script:AuthPending) {
         Write-Host ""
@@ -954,7 +954,7 @@ function Uninstall-Clawde {
     }
 
     if (-not $removedAnything) {
-        Write-Info "Nothing to uninstall " clawde is not installed."
+        Write-Info "Nothing to uninstall - clawde is not installed."
     }
     else {
         Write-Host ""

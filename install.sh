@@ -1,6 +1,6 @@
 ﻿#!/usr/bin/env bash
-# clawde installer  Linux / WSL
-#   Claude Work  OpenCode bridge
+# clawde installer - Linux / WSL
+#   Claude Work - OpenCode bridge
 #
 # Usage:
 #   curl -fsSL https://clawde.dev/install.sh | bash
