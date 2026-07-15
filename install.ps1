@@ -53,6 +53,10 @@ $Script:SkipConfig       = $false
 $Script:ExistingOpenCodePath = $null
 $Script:AuthPending          = $false
 
+# Progress bar state
+$Script:ProgressCurrent      = 0
+$Script:ProgressTotal        = 6
+
 # ====================================================================
 # Logging
 # ====================================================================
@@ -69,6 +73,60 @@ function Write-DebugMsg {
     if ($Script:Verbose -or $Verbose) {
         Write-Host "[DEBUG] $args" -ForegroundColor DarkGray
     }
+}
+
+# ====================================================================
+# Progress bar
+# ====================================================================
+function Show-Progress {
+    param(
+        [int]$Step,
+        [int]$Total,
+        [string]$Label
+    )
+    $Script:ProgressCurrent = $Step
+    $Script:ProgressTotal = $Total
+    Write-Host "`r$(' ' * 80)`r" -NoNewline
+    Write-Host "  ▸ $Label... " -NoNewline
+    Draw-ProgressBar $false
+}
+
+function Draw-ProgressBar {
+    param([switch]$AfterStep)
+    $filledStep = if ($AfterStep) { $Script:ProgressCurrent } else { $Script:ProgressCurrent - 1 }
+    $percent = [math]::Max(0, [math]::Min(100, [math]::Round($filledStep / $Script:ProgressTotal * 100)))
+    $barWidth = 30
+    $filled = [math]::Max(0, [math]::Round($barWidth * $filledStep / $Script:ProgressTotal))
+    $empty = $barWidth - $filled
+    
+    $bar = "[" + ("█" * $filled) + ("░" * $empty) + "]"
+    Write-Host "$bar $percent%" -NoNewline
+}
+
+function Set-StepDone {
+    param(
+        [string]$Summary
+    )
+    # Clear the current progress line
+    Write-Host "`r$(' ' * 80)`r" -NoNewline
+    # Draw bar showing completed step
+    Draw-ProgressBar -AfterStep
+    Write-Host ""
+    # Write permanent completion line
+    Write-Host "  ✓ $Summary"
+}
+
+function Set-StepFailed {
+    param(
+        [string]$Summary
+    )
+    # Clear the current progress line
+    Write-Host "`r$(' ' * 80)`r" -NoNewline
+    # Draw bar showing step as attempted
+    Draw-ProgressBar -AfterStep
+    Write-Host ""
+    # Write permanent failure line
+    Write-Host "  ✗ $Summary"
 }
 
 # ====================================================================
@@ -389,10 +447,10 @@ function Setup-Path {
 # Install OpenCode
 # ====================================================================
 function Install-OpenCode {
-    Write-Info "[1/6] Installing OpenCode binary..."
+    Show-Progress 1 6 "Installing OpenCode binary"
 
     if ($Script:SkipOpenCode) {
-        Write-Info "OpenCode installation skipped (existing installation preserved)"
+        Set-StepDone "OpenCode skipped (existing installation preserved)"
         return
     }
 
@@ -431,7 +489,7 @@ function Install-OpenCode {
     try {
         Invoke-WebRequest -Uri $downloadUrl -OutFile $Script:OPENCODE_EXE -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
         Register-Rollback $Script:OPENCODE_EXE
-        Write-OK "OpenCode $latestTag installed to $($Script:OPENCODE_EXE)"
+        Set-StepDone "OpenCode $latestTag installed"
     }
     catch {
         Write-Warn "Binary download failed for release $latestTag ($binaryName)"
@@ -445,7 +503,7 @@ function Install-OpenCode {
         try {
             Invoke-WebRequest -Uri $altUrl -OutFile $Script:OPENCODE_EXE -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
             Register-Rollback $Script:OPENCODE_EXE
-            Write-OK "OpenCode $latestTag installed to $($Script:OPENCODE_EXE)"
+            Set-StepDone "OpenCode $latestTag installed"
             return
         }
         catch {
@@ -500,22 +558,22 @@ function Install-OpenCodeFromSource {
     $Script:RollbackItems = $Script:RollbackItems | Where-Object { $_ -ne $tmpDir }
 
     Register-Rollback $Script:OPENCODE_EXE
-    Write-OK "OpenCode built from source and installed to $($Script:OPENCODE_EXE)"
+    Set-StepDone "OpenCode built from source and installed"
 }
 
 # ====================================================================
 # Install CCProxy
 # ====================================================================
 function Install-CCProxy {
-    Write-Info "[2/6] Installing CCProxy (Claude Work proxy)..."
+    Show-Progress 2 6 "Installing CCProxy (Claude Work proxy)"
 
     New-Item -ItemType Directory -Path $Script:CLAWDE_BIN_DIR -Force | Out-Null
 
     # Check if ccproxy already installed
     $ccproxyExe = Join-Path $Script:CLAWDE_BIN_DIR "ccproxy.exe"
     if (Test-Path $ccproxyExe) {
-        $ver = & $ccproxyExe --version 2>&1
-        Write-OK "CCProxy already installed ($ver)"
+        $ver = & $ccproxyExe --version 2>$null
+        Set-StepDone "CCProxy already installed ($ver)"
         return
     }
 
@@ -566,8 +624,8 @@ function Install-CCProxy {
             }
         }
         if (Test-Path $extractedExe) {
-            $ver = & $extractedExe --version 2>&1
-            Write-OK "CCProxy installed ($ver)"
+            $ver = & $extractedExe --version 2>$null
+            Set-StepDone "CCProxy installed ($ver)"
         } else {
             Write-Err "ccproxy.exe not found after extraction"
         }
@@ -584,7 +642,7 @@ function Install-CCProxy {
 # Install clawde CLI wrapper (PowerShell - no Python required)
 # ====================================================================
 function Install-Cli {
-    Write-Info "[3/6] Installing clawde CLI..."
+    Show-Progress 3 6 "Installing clawde CLI"
 
     # Download clawde.ps1 directly into clawde\bin
     $clawdePs1Url = "https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.ps1"
@@ -599,6 +657,7 @@ function Install-Cli {
     catch {
         Write-Warn "Failed to download clawde.ps1: $($_.Exception.Message)"
         Write-Warn "clawde CLI was not installed. You can install it manually."
+        Set-StepDone "clawde CLI installation failed"
         return
     }
 
@@ -609,14 +668,13 @@ function Install-Cli {
     $cmdShim = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0clawde.ps1`" %*"
     Set-Content -Path $clawdeCmdPath -Value $cmdShim -Encoding ASCII
 
-    Write-OK "clawde CLI installed to $clawdePs1Path"
+    Set-StepDone "clawde CLI installed"
 }
 
 # ====================================================================
 # Interactive config wizard
 # ====================================================================
 function Do-InteractiveConfig {
-    Write-Info "[4/6] Claude authentication"
 
     $authMethod = "oauth"
     $cliTokenPath = ""
@@ -691,6 +749,7 @@ function Write-Config {
 
     if ($Script:SkipConfig) {
         Write-Info "Config step skipped (existing config preserved)"
+        Set-StepDone "Configuration skipped (existing config preserved)"
         return
     }
 
@@ -728,6 +787,7 @@ rotation_days = 7
 
     Set-Content -Path $Script:CLAWDE_CONFIG_FILE -Value $configContent -Encoding UTF8
     Write-OK "Config written to $($Script:CLAWDE_CONFIG_FILE)"
+    Set-StepDone "Configuration complete"
 }
 
 # ====================================================================
@@ -769,7 +829,7 @@ function Write-ConfigFromEnv {
 # Service setup (Windows Scheduled Task)
 # ====================================================================
 function Setup-Service {
-    Write-Info "[5/6] Setting up service management..."
+    Show-Progress 5 6 "Setting up service management"
 
     $autoStart = $false
 
@@ -782,7 +842,7 @@ function Setup-Service {
     }
 
     if (-not $autoStart) {
-        Write-OK "Auto-start disabled - use 'clawde start' to launch manually"
+        Set-StepDone "Auto-start disabled (manual launch only)"
         return
     }
 
@@ -835,7 +895,7 @@ function Setup-Service {
             -Settings $taskSettings `
             -Principal $principal `
             -Force -ErrorAction Stop | Out-Null
-        Write-OK "Scheduled task '$($Script:TASK_NAME)' installed (auto-start on login)"
+        Set-StepDone "Scheduled task installed (auto-start on login)"
     }
     catch {
         Write-Err "Failed to register scheduled task: $($_.Exception.Message)
@@ -992,9 +1052,13 @@ try {
     Install-Cli
 
     # Config " interactive or non-interactive
+    Show-Progress 4 6 "Claude authentication"
     if ($Script:Yes) {
         if (-not $Script:SkipConfig) {
             Write-ConfigFromEnv
+        }
+        else {
+            Set-StepDone "Configuration skipped (existing config preserved)"
         }
     }
     else {
@@ -1002,6 +1066,9 @@ try {
     }
 
     Setup-Service
+
+    Show-Progress 6 6 "Finishing"
+    Set-StepDone "Installation complete"
 
     # Mark success so engine exit handler won't roll back
     $Script:InstallCompleted = $true

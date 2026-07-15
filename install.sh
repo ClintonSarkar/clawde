@@ -45,6 +45,8 @@ SKIP_OPENCODE=false
 SKIP_CONFIG=false
 EXISTING_OPENCODE_PATH=""
 AUTH_PENDING=false
+PROGRESS_CURRENT=0
+PROGRESS_TOTAL=6
 
 # ====================================================================
 # Colors & Logging
@@ -61,6 +63,52 @@ ok()    { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 debug() { [[ "$VERBOSE" == "true" ]] && echo -e "[DEBUG] $*"; }
+
+# ====================================================================
+# Progress bar
+# ====================================================================
+show_progress() {
+  PROGRESS_CURRENT=$1
+  PROGRESS_TOTAL=$2
+  PROGRESS_LABEL="$3"
+  _redraw_bar
+}
+
+_redraw_bar() {
+  local percent filled empty bar bar_width=30
+  percent=$(( (PROGRESS_CURRENT - 1) * 100 / PROGRESS_TOTAL ))
+  [[ $percent -lt 0 ]] && percent=0
+  filled=$(( percent * bar_width / 100 ))
+  empty=$(( bar_width - filled ))
+  bar=""
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do bar+="░"; done
+  printf "\r  ▸ %s... [%s] %d%%" "$PROGRESS_LABEL" "$bar" "$percent"
+}
+
+_draw_bar() {
+  local percent filled empty bar bar_width=30 current=$1
+  percent=$(( current * 100 / PROGRESS_TOTAL ))
+  [[ $percent -gt 100 ]] && percent=100
+  filled=$(( percent * bar_width / 100 ))
+  empty=$(( bar_width - filled ))
+  bar=""
+  for ((i=0; i<filled; i++)); do bar+="█"; done
+  for ((i=0; i<empty; i++)); do bar+="░"; done
+  printf "[%s] %d%%" "$bar" "$percent"
+}
+
+step_done() {
+  printf "\r\033[K  ✓ "
+  _draw_bar $PROGRESS_CURRENT
+  printf " %s\n" "$1"
+}
+
+step_fail() {
+  printf "\r\033[K  ✗ "
+  _draw_bar $PROGRESS_CURRENT
+  printf " %s\n" "$1"
+}
 
 # ====================================================================
 # Banner
@@ -478,10 +526,10 @@ setup_path() {
 # Install OpenCode (binary from GitHub releases)
 # ====================================================================
 install_opencode() {
-  info "[1/6] Installing OpenCode binary..."
+  show_progress 1 6 "Installing OpenCode binary"
 
   if [[ "${SKIP_OPENCODE:-false}" == "true" ]]; then
-    info "OpenCode installation skipped (existing installation preserved)"
+    step_done "OpenCode skipped (existing installation preserved)"
     return 0
   fi
 
@@ -513,7 +561,7 @@ install_opencode() {
   if curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$OPENCODE_BIN" 2>/dev/null; then
     chmod +x "$OPENCODE_BIN"
     register_rollback "$OPENCODE_BIN"
-    ok "OpenCode ${latest_tag} installed to ${OPENCODE_BIN}"
+    step_done "OpenCode ${latest_tag} installed"
     return
   fi
 
@@ -531,7 +579,7 @@ install_opencode() {
     if curl -fsSL --connect-timeout 10 --max-time 60 "$download_url" -o "$OPENCODE_BIN" 2>/dev/null; then
       chmod +x "$OPENCODE_BIN"
       register_rollback "$OPENCODE_BIN"
-      ok "OpenCode ${latest_tag} installed to ${OPENCODE_BIN}"
+      step_done "OpenCode ${latest_tag} installed"
       return
     fi
     rm -f "$OPENCODE_BIN" 2>/dev/null || true
@@ -578,14 +626,14 @@ install_opencode_from_source() {
   chmod +x "$OPENCODE_BIN"
   register_rollback "$OPENCODE_BIN"
 
-  ok "OpenCode built from source and installed to ${OPENCODE_BIN}"
+  step_done "OpenCode built from source and installed"
 }
 
 # ====================================================================
 # Install CCProxy (binary from GitHub releases)
 # ====================================================================
 install_ccproxy() {
-  info "[2/6] Installing CCProxy (Claude Work proxy)..."
+  show_progress 2 6 "Installing CCProxy (Claude Work proxy)"
 
   mkdir -p "$CLAWDE_BIN_DIR"
 
@@ -593,7 +641,7 @@ install_ccproxy() {
   if [[ -x "$ccproxy_exe" ]]; then
     local ver
     ver="$("$ccproxy_exe" --version 2>/dev/null || echo "unknown")"
-    ok "CCProxy already installed ($ver)"
+    step_done "CCProxy already installed (${ver})"
     return
   fi
 
@@ -655,7 +703,7 @@ install_ccproxy() {
   if [[ -x "$ccproxy_exe" ]]; then
     local ver
     ver="$("$ccproxy_exe" --version 2>/dev/null || echo "unknown")"
-    ok "CCProxy installed ($ver)"
+    step_done "CCProxy ${tag_name} installed"
   else
     warn "ccproxy not found after extraction"
   fi
@@ -673,7 +721,7 @@ install_ccproxy() {
 # Install clawde CLI wrapper (Bash script - no Python required)
 # ====================================================================
 install_cli() {
-  info "[3/6] Installing clawde CLI..."
+  show_progress 3 6 "Installing clawde CLI"
 
   local clawde_url="https://raw.githubusercontent.com/ClintonSarkar/clawde/main/cli/clawde.sh"
   local clawde_path="${CLAWDE_BIN_DIR}/clawde"
@@ -690,7 +738,7 @@ install_cli() {
   chmod +x "$clawde_path"
   register_rollback "$clawde_path"
 
-  ok "clawde CLI installed to ${clawde_path}"
+  step_done "clawde CLI installed to ${clawde_path}"
 }
 
 # ====================================================================
@@ -700,7 +748,7 @@ do_interactive_config() {
   local auth_method="" cli_token_path="" port="" auto_start="" models=""
   local auth_choice=""
 
-  info "[4/6] Claude authentication"
+  show_progress 4 6 "Claude authentication"
   echo ""
   echo "  Choose authentication method:"
   echo "    1. OAuth login (opens browser  recommended)"
@@ -762,7 +810,7 @@ write_config() {
   local auth_method="$1" cli_token_path="$2" port="$3" auto_start="$4" models="$5"
 
   if [[ "${SKIP_CONFIG:-false}" == "true" ]]; then
-    info "Config step skipped (existing config preserved)"
+    step_done "Configuration skipped (existing config preserved)"
     return 0
   fi
 
@@ -799,14 +847,14 @@ level = "info"
 rotation_days = 7
 EOF
 
-  ok "Config written to ${CLAWDE_CONFIG_FILE}"
+  step_done "Configuration written to ${CLAWDE_CONFIG_FILE}"
 }
 
 # ====================================================================
 # Service setup (systemd or WSL shell profile)
 # ====================================================================
 setup_service() {
-  info "[5/6] Setting up service management..."
+  show_progress 5 6 "Setting up service management"
 
   # Read auto_start from config
   local auto_start
@@ -818,7 +866,7 @@ setup_service() {
   fi
 
   if [[ "$auto_start" != "true" ]]; then
-    ok "Auto-start disabled  use 'clawde start' to launch manually"
+    step_done "Auto-start disabled (use 'clawde start' to launch)"
     return 0
   fi
 
@@ -845,11 +893,12 @@ setup_service() {
         echo "# Start clawde proxy on shell launch (added by clawde installer v${CLAWDE_VERSION})"
         echo "command -v ccproxy >/dev/null 2>&1 && nohup ccproxy serve --port ${port} >/dev/null 2>&1 &"
       } >> "$rc_file"
-      ok "Added clawde auto-start to ${rc_file}"
+      info "Added clawde auto-start to ${rc_file}"
     else
       warn "Auto-start entry already exists in ${rc_file}"
     fi
 
+    step_done "Auto-start configured for WSL"
     info "Note: proxy will start when you open a terminal. To start manually: ccproxy serve --port ${port}"
     return 0
   fi
@@ -888,7 +937,7 @@ EOF
 
     systemctl --user daemon-reload 2>/dev/null || warn "systemctl daemon-reload failed; check systemd is functional"
     systemctl --user enable "${SYSTEMD_SERVICE_NAME}.service" 2>/dev/null || warn "Could not enable systemd service (is systemd available?)"
-    ok "Systemd user service installed and enabled"
+    step_done "Systemd user service configured"
     info "  Service: ${SYSTEMD_SERVICE_NAME}.service"
     info "  Start:   systemctl --user start ${SYSTEMD_SERVICE_NAME}.service"
     return 0
@@ -1092,18 +1141,25 @@ main() {
       if [[ "${CLAWDE_AUTH_METHOD:-oauth}" == "oauth" ]]; then
         AUTH_PENDING=true
       fi
+      show_progress 4 6 "Claude authentication"
       write_config \
         "${CLAWDE_AUTH_METHOD:-oauth}" \
         "${CLAWDE_CLI_TOKEN_PATH:-}" \
         "${CLAWDE_PORT:-8080}" \
         "${CLAWDE_AUTO_START:-false}" \
         "${CLAWDE_MODELS:-all}"
+    else
+      show_progress 4 6 "Claude authentication"
+      step_done "Configuration skipped (existing config preserved)"
     fi
   else
     do_interactive_config
   fi
 
   setup_service
+
+  show_progress 6 6 "Finishing"
+  step_done "Installation complete"
 
   # Mark success so the EXIT trap won't roll back
   INSTALL_COMPLETED=true

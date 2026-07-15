@@ -65,9 +65,9 @@ function Get-Pid-File($name) {
     return $null
 }
 
-function Write-Pid-File($name, $pid) {
+function Write-Pid-File($name, $processId) {
     $pidFile = Join-Path $PidDir "$name.pid"
-    Set-Content -Path $pidFile -Value $pid -NoNewline
+    Set-Content -Path $pidFile -Value $processId -NoNewline
 }
 
 function Remove-Pid-File($name) {
@@ -75,10 +75,10 @@ function Remove-Pid-File($name) {
     if (Test-Path $pidFile) { Remove-Item $pidFile -Force }
 }
 
-function Test-ProcessRunning($pid) {
-    if (-not $pid) { return $false }
+function Test-ProcessRunning($processId) {
+    if (-not $processId) { return $false }
     try {
-        $proc = Get-Process -Id $pid -ErrorAction Stop
+        $null = Get-Process -Id $processId -ErrorAction Stop
         return $true
     } catch {
         return $false
@@ -127,10 +127,11 @@ function Cmd-Start($extraArgs) {
         Write-Host "[INFO] Starting CCProxy..." -ForegroundColor Cyan
         $ccproxyExe = Find-Binary "ccproxy.exe"
         $logFile = Join-Path $LogDir "ccproxy.log"
+        $errFile = Join-Path $LogDir "ccproxy.err"
         $proc = Start-Process -FilePath $ccproxyExe `
             -ArgumentList "serve", "--port", $port `
             -RedirectStandardOutput $logFile `
-            -RedirectStandardError $logFile `
+            -RedirectStandardError $errFile `
             -NoNewWindow -PassThru
         Write-Pid-File "proxy" $proc.Id
 
@@ -162,22 +163,21 @@ function Cmd-Start($extraArgs) {
         $opencodeExe = Find-Binary "opencode.exe"
         $env:OPENCODE_PROVIDER_CLAWDE_BASE_URL = "http://${host_}:${port}/v1"
         $env:OPENCODE_PROVIDER_CLAWDE_API_KEY = "clawde"
-        # Foreground - user interacts with this
-        $proc = Start-Process -FilePath $opencodeExe `
-            -ArgumentList $extraArgs `
-            -NoNewWindow -PassThru
-        Write-Pid-File "opencode" $proc.Id
-        Write-Host "[OK] OpenCode started (PID $($proc.Id))" -ForegroundColor Green
+        # Interactive foreground - user interacts with this
+        Write-Host "[INFO] Attaching to OpenCode console..." -ForegroundColor Cyan
+        Write-Host "[INFO] Press Ctrl+C to stop OpenCode and return to shell`n" -ForegroundColor Cyan
+        & $opencodeExe $extraArgs
+        Write-Host "`n[INFO] OpenCode exited" -ForegroundColor Cyan
     }
 }
 
 function Cmd-Stop {
     foreach ($name in @("opencode", "proxy")) {
-        $pid = Get-Pid-File $name
-        if ($pid -and (Test-ProcessRunning $pid)) {
+        $procId = Get-Pid-File $name
+        if ($procId -and (Test-ProcessRunning $procId)) {
             try {
-                Stop-Process -Id $pid -Force -ErrorAction Stop
-                Write-Host "[OK] $name stopped (was PID $pid)" -ForegroundColor Green
+                Stop-Process -Id $procId -Force -ErrorAction Stop
+                Write-Host "[OK] $name stopped (was PID $procId)" -ForegroundColor Green
             } catch {
                 Write-Host "[ERROR] Failed to stop ${name}: $_" -ForegroundColor Red
             }
@@ -349,7 +349,7 @@ if ($command -eq "--help" -or $command -eq "-h") {
 
 switch ($command) {
     "start" {
-        $extra = $args[1..($args.Length - 1)]
+        $extra = if ($args.Length -gt 1) { $args[1..($args.Length - 1)] } else { @() }
         Cmd-Start $extra
     }
     "stop" { Cmd-Stop }
