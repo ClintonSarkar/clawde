@@ -251,6 +251,28 @@ function Check-Existing {
     $haveConfig   = Test-Path $Script:CLAWDE_CONFIG_FILE -PathType Leaf
 
     if (-not $haveOpenCode -and -not $haveConfig) {
+        if ($Script:ExistingOpenCodePath) {
+            Write-Host ""
+            Write-Host "  What would you like to do?"
+            Write-Host "    1. [I]nstall new OpenCode binary (clawde's own copy)"
+            Write-Host "    2. [U]se existing OpenCode from PATH"
+            Write-Host "    3. [C]ancel"
+            Write-Host ""
+            $action = Read-Host "  Select [2]"
+            if (-not $action) { $action = "2" }
+            switch -Wildcard ($action) {
+                "1" { Write-DebugMsg "User chose install new binary" }
+                "I" { Write-DebugMsg "User chose install new binary" }
+                "I*" { Write-DebugMsg "User chose install new binary" }
+                "2" { Write-Info "Using existing OpenCode from: $($Script:ExistingOpenCodePath)"; $Script:SkipOpenCode = $true; return }
+                "U" { Write-Info "Using existing OpenCode from: $($Script:ExistingOpenCodePath)"; $Script:SkipOpenCode = $true; return }
+                "U*" { Write-Info "Using existing OpenCode from: $($Script:ExistingOpenCodePath)"; $Script:SkipOpenCode = $true; return }
+                "3" { Write-Info "Installation cancelled by user."; exit 0 }
+                "C" { Write-Info "Installation cancelled by user."; exit 0 }
+                "C*" { Write-Info "Installation cancelled by user."; exit 0 }
+                default { Write-Warn "Invalid choice '$action', defaulting to use existing"; Write-Info "Using existing OpenCode from: $($Script:ExistingOpenCodePath)"; $Script:SkipOpenCode = $true; return }
+            }
+        }
         Write-DebugMsg "No existing clawde installation detected"
         return
     }

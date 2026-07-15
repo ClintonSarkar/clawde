@@ -319,6 +319,36 @@ check_existing() {
   fi
 
   if ! $have_opencode && ! $have_config; then
+    if [[ -n "${EXISTING_OPENCODE_PATH:-}" ]]; then
+      echo ""
+      echo "  What would you like to do?"
+      echo "    1. [I]nstall new OpenCode binary (clawde's own copy)"
+      echo "    2. [U]se existing OpenCode from PATH"
+      echo "    3. [C]ancel"
+      echo ""
+      read -rp "  Select [2]: " action
+      action="${action:-2}"
+      case "$action" in
+        [Ii]|1)
+          debug "User chose install new binary"
+          ;;
+        [Uu]|2)
+          info "Using existing OpenCode from: ${EXISTING_OPENCODE_PATH}"
+          SKIP_OPENCODE=true
+          return 0
+          ;;
+        [Cc]|3)
+          info "Installation cancelled by user."
+          exit 0
+          ;;
+        *)
+          warn "Invalid choice '$action', defaulting to use existing"
+          info "Using existing OpenCode from: ${EXISTING_OPENCODE_PATH}"
+          SKIP_OPENCODE=true
+          return 0
+          ;;
+      esac
+    fi
     debug "No existing clawde installation detected"
     return 0
   fi
