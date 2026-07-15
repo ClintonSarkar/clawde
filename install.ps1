@@ -15,16 +15,31 @@
 #   CLAWDE_AUTO_START   Auto-start on login: true | false (default: false)
 #   CLAWDE_MODELS       Models to expose (default: all)
 
-#Requires -Version 5.1
+# clawde installer - Windows (PowerShell 5+)
+# Supports: irm <url> | iex  OR  .\install.ps1 [-Yes] [-Verbose] [-Uninstall]
 
-[CmdletBinding()]
-param(
-    [switch]$Yes,       # Non-interactive mode; accept all defaults
-    [switch]$Verbose,   # Enable verbose/debug output
-    [switch]$Uninstall, # Remove clawde completely
-    [switch]$Help       # Show help
-)
+# Parse arguments (works with both file execution and iex)
+$Yes = $false
+$Verbose = $false
+$Uninstall = $false
+$Help = $false
+if ($args) {
+    foreach ($a in $args) {
+        switch -Wildcard ($a) {
+            "-Yes"       { $Yes = $true }
+            "-Verbose"   { $Verbose = $true }
+            "-Uninstall" { $Uninstall = $true }
+            "-Help"      { $Help = $true }
+        }
+    }
+}
 
+if ($MyInvocation.BoundParameters) {
+    if ($MyInvocation.BoundParameters.ContainsKey("Yes")) { $Yes = $true }
+    if ($MyInvocation.BoundParameters.ContainsKey("Verbose")) { $Verbose = $true }
+    if ($MyInvocation.BoundParameters.ContainsKey("Uninstall")) { $Uninstall = $true }
+    if ($MyInvocation.BoundParameters.ContainsKey("Help")) { $Help = $true }
+}
 # ====================================================================
 # Constants
 # ====================================================================
@@ -62,7 +77,7 @@ function Write-Err {
 }
 
 function Write-DebugMsg {
-    if ($Script:Verbose -or $PSBoundParameters.ContainsKey('Verbose')) {
+    if ($Script:Verbose -or $Verbose) {
         Write-Host "[DEBUG] $args" -ForegroundColor DarkGray
     }
 }
@@ -216,7 +231,6 @@ function Check-Deps {
     if ($Script:PYTHON) {
         & $Script:PYTHON -m pip --version > $null 2>&1
         if ($LASTEXITCODE -eq 0) { $Script:HasPip = $true }
-    }
     }
 
     # Check for git (only needed for source builds)
@@ -603,7 +617,7 @@ function Install-Cli {
     Register-Rollback $clawdeCmdPath
 
     # Create CMD shim that calls the PowerShell script
-    $cmdShim = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0clawde.ps1" %*"
+    $cmdShim = "@echo off`r`npowershell -NoProfile -ExecutionPolicy Bypass -File `"%~dp0clawde.ps1`" %*"
     Set-Content -Path $clawdeCmdPath -Value $cmdShim -Encoding ASCII
 
     Write-OK "clawde CLI installed to $clawdePs1Path"
@@ -779,7 +793,7 @@ function Setup-Service {
     }
 
     if (-not $autoStart) {
-        Write-OK "Auto-start disabled - use" 'clawde start' to launch manually"
+        Write-OK "Auto-start disabled - use 'clawde start' to launch manually"
         return
     }
 
@@ -974,7 +988,7 @@ try {
     }
 
     # Propagate -Verbose from param binding
-    if ($PSBoundParameters.ContainsKey('Verbose') -and $Verbose) {
+    if ($Verbose) {
         $Script:Verbose = $true
     }
 
