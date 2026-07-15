@@ -232,11 +232,37 @@ function Cmd-Auth {
     Write-Host ""
     try {
         $ccproxy = Find-Binary "ccproxy.exe"
-        & $ccproxy auth login claude
+
+        # Initialize CCProxy config if missing (otherwise auth provider can't be found)
+        $ccproxyConfigDir = Join-Path $env:USERPROFILE ".config\ccproxy"
+        $ccproxyConfigFile = Join-Path $ccproxyConfigDir "ccproxy.config.settings"
+        if (-not (Test-Path $ccproxyConfigFile)) {
+            Write-Host "  [INFO] Initializing CCProxy config (first-time setup)..." -ForegroundColor Yellow
+            & $ccproxy config init --output-dir $ccproxyConfigDir 2>$null | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "  [WARN] ccproxy config init had warnings (continuing)" -ForegroundColor Yellow
+            }
+        }
+
+        # Check if any auth providers are available before attempting login
+        $providersCheck = & $ccproxy auth providers 2>$null | Out-String
+        if ($providersCheck -match 'No OAuth providers found') {
+            Write-Host "[ERROR] No auth providers installed in this CCProxy release" -ForegroundColor Red
+            Write-Host "  This usually means the claude plugin is missing from the binary." -ForegroundColor Yellow
+            Write-Host "  Check: https://github.com/ClintonSarkar/ccproxy-api/releases" -ForegroundColor Gray
+            exit 1
+        }
+
+        # Run auth login, suppressing noise (warnings come from missing config/plugins)
+        $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
         if ($LASTEXITCODE -eq 0) {
             Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
         } else {
-            Write-Host "`n[ERROR] Authentication failed" -ForegroundColor Red
+            # Show the last useful line from output
+            $errorLine = ($authOutput -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '\[warning' -and $_ -notmatch 'cmd_id' -and $_ -notmatch '^\[2m' -and $_ -notmatch 'config_file_missing|plugins_directories_missing|auth_provider_not_found' } | Select-Object -Last 1).Trim()
+            # Strip ANSI codes from error line
+            $errorLine = $errorLine -replace '\x1b\[[0-9;]*m', ''
+            Write-Host "`n[ERROR] Authentication failed: $errorLine" -ForegroundColor Red
             exit 1
         }
     } catch {

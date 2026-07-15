@@ -221,7 +221,16 @@ cmd_auth() {
   echo ""
   local ccproxy_bin
   ccproxy_bin="$(find_binary ccproxy)"
-  if "$ccproxy_bin" auth login claude; then
+
+  # Initialize CCProxy config if missing (otherwise auth provider can't be found)
+  local ccproxy_config_dir="${HOME}/.config/ccproxy"
+  local ccproxy_config_file="${ccproxy_config_dir}/ccproxy.config.settings"
+  if [[ ! -f "$ccproxy_config_file" ]]; then
+    echo "  [INFO] Initializing CCProxy config (first-time setup)..."
+    "$ccproxy_bin" config init --output-dir "$ccproxy_config_dir" 2>/dev/null || true
+  fi
+
+  if "$ccproxy_bin" auth login claude 2>&1 | grep -v -E '\[warning|cmd_id|config_file_missing|plugins_directories_missing|auth_provider_not_found' | grep -v '^\[2m'; then
     echo ""
     echo "[OK] Authentication complete"
   else
