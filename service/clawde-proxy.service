@@ -1,0 +1,13 @@
+[Unit]
+Description=clawde — CCProxy (Claude Work proxy)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ccproxy serve --port 8080
+Restart=on-failure
+RestartSec=5
+Environment=CLAWDE_CONFIG_DIR=%h/.config/clawde
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,95 @@
+# clawde — Architecture & Developer Guide
+
+## Overview
+
+clawde is a deployment wrapper that bridges a Claude Work subscription to OpenCode (the open-source coding agent). It does **not** contain the source code of either OpenCode or CCProxy — it installs and configures them.
+
+## Components
+
+```
+┌─────────────────────────────────────────────────┐
+│                  clawde CLI                       │
+│  (start | stop | status | config | auth |        │
+│   update | logs)                                  │
+└──────────┬──────────────────────┬────────────────┘
+           │                      │
+           ▼                      ▼
+    ┌──────────────┐      ┌──────────────┐
+    │   CCProxy     │      │   OpenCode   │
+    │  (Python)     │      │  (Go binary) │
+    │  localhost    │◄─────│  coding agent│
+    │  :8080/v1     │      │              │
+    └──────┬───────┘      └──────────────┘
+           │
+           ▼
+    ┌──────────────┐
+    │ Claude Work   │
+    │ subscription  │
+    │ (OAuth/token) │
+    └──────────────┘
+```
+
+## Repository structure
+
+```
+clawde/
+├── README.md                  # User-facing docs
+├── LICENSE                    # MIT
+├── install.sh                 # Linux/WSL installer
+├── install.ps1                # Windows installer
+├── pyproject.toml             # Python package config for the CLI
+├── config/
+│   └── clawde.toml            # Default config template
+├── cli/
+│   └── clawde.py              # Unified CLI wrapper
+├── service/
+│   ├── clawde-proxy.service   # systemd user unit (Linux)
+│   └── clawde-proxy.xml       # Windows scheduled task XML
+├── docs/
+│   ├── ARCHITECTURE.md        # This file
+│   ├── linux-setup.md         # Linux detailed guide
+│   ├── wsl-setup.md           # WSL-specific notes
+│   └── windows-setup.md       # Windows detailed guide
+└── .github/
+    └── workflows/
+        └── release.yml        # Build + publish releases
+```
+
+## Install flow
+
+1. User runs `curl ... | bash` (Linux) or `irm ... | iex` (Windows)
+2. Installer detects OS + architecture
+3. Downloads OpenCode binary from GitHub releases (or builds from source)
+4. Installs CCProxy via `uv` / `pipx` / `pip`
+5. Interactive config wizard:
+   - Auth method (OAuth vs CLI token)
+   - Port, auto-start, models
+6. Sets up service management (systemd / scheduled task)
+7. User runs `clawde start` to begin
+
+## Config paths
+
+| Platform | Config                   | Logs                          | PIDs                        |
+|----------|--------------------------|-------------------------------|-----------------------------|
+| Linux    | `~/.config/clawde/`      | `~/.local/share/clawde/logs/` | `~/.local/share/clawde/pids/` |
+| WSL      | `~/.config/clawde/`      | `~/.local/share/clawde/logs/` | `~/.local/share/clawde/pids/` |
+| Windows  | `%APPDATA%\clawde\`      | `%LOCALAPPDATA%\clawde\logs\` | `%LOCALAPPDATA%\clawde\pids\` |
+
+## External dependencies
+
+| Component  | Source repo                          | Installed via         |
+|------------|--------------------------------------|-----------------------|
+| OpenCode   | ClintonSarkar/opencode (fork)        | Binary download / Go build |
+| CCProxy    | ClintonSarkar/ccproxy-api (fork)     | pipx / uv / pip       |
+
+## Custom agent modes
+
+Custom OpenCode agent modes are developed in the OpenCode fork (`ClintonSarkar/opencode`), not in this repo. clawde installs the binary from that fork's releases, so any agent modes you add there are automatically available to clawde users.
+
+## Release workflow
+
+GitHub Actions in this repo:
+1. Triggered on tag push (e.g., `v0.1.0`)
+2. Downloads/builds OpenCode binary for linux-x64, linux-arm64, windows-x64
+3. Publishes as GitHub release assets
+4. Users get updates via `clawde update`

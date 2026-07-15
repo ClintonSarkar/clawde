@@ -1,0 +1,31 @@
+# clawde configuration file
+# Generated during install — edit with `clawde config`
+
+[proxy]
+# CCProxy settings
+port = 8080
+host = "127.0.0.1"
+
+[claude]
+# Authentication method: "oauth" or "cli_token"
+auth_method = "oauth"
+# Path to existing Claude CLI token (used when auth_method = "cli_token")
+cli_token_path = ""
+
+[opencode]
+# OpenCode provider config
+provider_name = "clawde"
+# Auto-start services on boot
+auto_start = false
+
+[models]
+# Which models to expose from Claude Work plan
+# "all" = discover dynamically, or specify a list
+expose = "all"
+
+[logging]
+# Log directory (defaults to platform-specific)
+# Linux/WSL: ~/.local/share/clawde/logs
+# Windows: %APPDATA%\clawde\logs
+level = "info"
+rotation_days = 7
