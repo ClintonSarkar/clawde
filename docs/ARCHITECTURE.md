@@ -35,21 +35,20 @@ clawde is a deployment wrapper that bridges a Claude Work subscription to OpenCo
 clawde/
 ├── README.md                  # User-facing docs
 ├── LICENSE                    # MIT
-├── install.sh                 # Linux/WSL installer
-├── install.ps1                # Windows installer
-├── pyproject.toml             # Python package config for the CLI
+├── .gitattributes             # Line-ending control
+├── install.sh                 # Linux/WSL installer (1170 lines)
+├── install.ps1                # Windows installer (1221 lines)
 ├── config/
 │   └── clawde.toml            # Default config template
 ├── cli/
-│   └── clawde.py              # Unified CLI wrapper
+│   ├── clawde.ps1             # Windows CLI management (530 lines)
+│   ├── clawde.sh              # Linux/WSL CLI management (473 lines)
+│   └── clawde.cmd             # CMD shim (2 lines)
 ├── service/
 │   ├── clawde-proxy.service   # systemd user unit (Linux)
-│   └── clawde-proxy.xml       # Windows scheduled task XML
+│   └── clawde-proxy.xml       # Windows scheduled task XML (unused — installer uses New-ScheduledTask)
 ├── docs/
-│   ├── ARCHITECTURE.md        # This file
-│   ├── linux-setup.md         # Linux detailed guide
-│   ├── wsl-setup.md           # WSL-specific notes
-│   └── windows-setup.md       # Windows detailed guide
+│   └── ARCHITECTURE.md        # This file
 └── .github/
     └── workflows/
         └── release.yml        # Build + publish releases

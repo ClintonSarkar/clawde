@@ -1,0 +1,39 @@
+# OS files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor temp files
+*.swp
+*.swo
+*~
+
+# Backup files
+*.bak
+*.backup
+
+# Logs
+*.log
+
+# Temp directories
+tmp/
+temp/
+
+# Python build artifacts
+dist/
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+
+# Go build artifacts
+opencode
+opencode.exe
+
+# Janitor scratchpad (local runtime state)
+.janitor/
+
+# IDE
+.idea/
+.vscode/
+*.sublime-*
