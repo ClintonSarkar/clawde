@@ -848,6 +848,57 @@ rotation_days = 7
 EOF
 
   step_done "Configuration written to ${CLAWDE_CONFIG_FILE}"
+
+  # Set up OpenCode provider config for ccproxy
+  setup_opencode_provider "$port"
+}
+
+# ====================================================================
+# Setup OpenCode provider config for ccproxy
+# ====================================================================
+setup_opencode_provider() {
+  local port="$1"
+
+  # Determine OpenCode config path
+  local opencode_config_dir="${HOME}/.config/opencode"
+  local opencode_config_file="${opencode_config_dir}/opencode.json"
+
+  # Create config directory if it doesn't exist
+  mkdir -p "$opencode_config_dir"
+
+  # Check if config already exists
+  local existing_config="{}"
+  if [[ -f "$opencode_config_file" ]]; then
+    existing_config="$(cat "$opencode_config_file" 2>/dev/null || echo "{}")"
+    # Validate JSON
+    if ! echo "$existing_config" | jq -e . >/dev/null 2>&1; then
+      warn "Could not parse existing OpenCode config, will create new"
+      existing_config="{}"
+    fi
+  fi
+
+  # Ensure provider section exists and add/update ccproxy provider
+  local updated_config
+  updated_config="$(echo "$existing_config" | jq --arg port "$port" '
+    .provider = (.provider // {}) |
+    .provider["ccproxy-claude"] = {
+      npm: "@ai-sdk/openai-compatible",
+      name: "CCProxy (Claude Max)",
+      options: { baseURL: "http://127.0.0.1:$port/api/v1" },
+      models: {
+        "claude-sonnet-4-20250514": { name: "Claude Sonnet 4" },
+        "claude-opus-4-20250514": { name: "Claude Opus 4" }
+      }
+    }
+  ' 2>/dev/null)"
+
+  if [[ -z "$updated_config" ]] || [[ "$updated_config" == "null" ]]; then
+    warn "Failed to generate OpenCode config (jq may not be installed), skipping"
+    return 0
+  fi
+
+  echo "$updated_config" > "$opencode_config_file"
+  ok "OpenCode provider config written to $opencode_config_file"
 }
 
 # ====================================================================
