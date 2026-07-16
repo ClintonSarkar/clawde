@@ -1,3 +1,3 @@
-*.ps1 binary
-*.sh binary
-*.cmd binary
+*.ps1 -text diff
+*.sh -text diff
+*.cmd -text diff
