@@ -923,6 +923,58 @@ rotation_days = 7
     Set-Content -Path $Script:CLAWDE_CONFIG_FILE -Value $configContent -Encoding UTF8
     Write-OK "Config written to $($Script:CLAWDE_CONFIG_FILE)"
     Set-StepDone "Configuration complete"
+
+    # Set up OpenCode provider config for ccproxy
+    Setup-OpenCodeProvider $Port
+}
+
+# ====================================================================
+# Setup OpenCode provider config for ccproxy
+# ====================================================================
+function Setup-OpenCodeProvider {
+    param(
+        [string]$Port
+    )
+
+    # Determine OpenCode config path
+    $opencodeConfigDir = Join-Path $env:LOCALAPPDATA "opencode"
+    $opencodeConfigFile = Join-Path $opencodeConfigDir "opencode.json"
+
+    # Create config directory if it doesn't exist
+    New-Item -ItemType Directory -Path $opencodeConfigDir -Force | Out-Null
+
+    # Check if config already exists
+    $existingConfig = @{}
+    if (Test-Path $opencodeConfigFile) {
+        try {
+            $existingConfig = Get-Content $opencodeConfigFile -Raw | ConvertFrom-Json -Depth 10
+        } catch {
+            Write-Warn "Could not parse existing OpenCode config, will create new"
+            $existingConfig = @{}
+        }
+    }
+
+    # Ensure provider section exists
+    if (-not $existingConfig.provider) {
+        $existingConfig.provider = @{}
+    }
+
+    # Add/Update ccproxy provider
+    $existingConfig.provider["ccproxy-claude"] = @{
+        npm = "@ai-sdk/openai-compatible"
+        name = "CCProxy (Claude Max)"
+        options = @{
+            baseURL = "http://127.0.0.1:$Port/api/v1"
+        }
+        models = @{
+            "claude-sonnet-4-20250514" = @{ name = "Claude Sonnet 4" }
+            "claude-opus-4-20250514" = @{ name = "Claude Opus 4" }
+        }
+    }
+
+    # Write the updated config
+    $existingConfig | ConvertTo-Json -Depth 10 | Set-Content -Path $opencodeConfigFile -Encoding UTF8
+    Write-OK "OpenCode provider config written to $opencodeConfigFile"
 }
 
 # ====================================================================
