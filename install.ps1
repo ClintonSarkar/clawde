@@ -747,10 +747,11 @@ function Install-CCProxy {
             Write-Warn "Install Python 3.11+ and pipx, then run: pipx install ccproxy-api[plugins-claude,plugins-codex]"
             Write-Warn "Then re-run this installer to wire it into the clawde bin dir."
         }
-        # If we get here, skip the broken binary install
-        Write-Warn "Skipping CCProxy download (existing binary has no plugins)"
-        Set-StepDone "CCProxy skipped (use 'pipx install ccproxy-api[plugins-claude,plugins-codex]')"
-        return
+        # If we get here, still download the latest binary (it can serve even without auth plugins).
+        # The ccproxy.exe binary itself works fine — only the OAuth plugin is missing.
+        Write-Warn "Continuing to download latest ccproxy.exe binary (auth plugins only needed for 'clawde auth')"
+        Write-Warn "To get auth support later, install pipx and run: pipx install ccproxy-api[plugins-claude,plugins-codex]"
+        # Fall through to re-download the latest binary
     }
     Write-DebugMsg "Fetching latest CCProxy release..."
     try {
