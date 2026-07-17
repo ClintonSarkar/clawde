@@ -287,7 +287,7 @@ function Cmd-Auth {
                         $shimPath = (Get-Command ccproxy -ErrorAction SilentlyContinue).Source
                         if ($shimPath) {
                             $ccproxyShim = Join-Path (Split-Path $ccproxy -Parent) "ccproxy.cmd"
-                            $shimContent = "@echo off`r`n\"$shimPath\" %*`r`n"
+                            $shimContent = "@echo off`r`n`"$shimPath`" %*`r`n"
                             Set-Content -Path $ccproxyShim -Value $shimContent -Encoding ASCII -Force
                             Write-Host "  [OK] ccproxy-api installed via pipx" -ForegroundColor Green
                             # Retry auth
