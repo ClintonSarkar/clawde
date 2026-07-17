@@ -86,7 +86,7 @@ function Show-Progress {
     )
     $Script:ProgressCurrent = $Step
     $Script:ProgressTotal = $Total
-    Write-Host "  Γû╕ $Label... " -NoNewline
+    Write-Host "  > $Label... " -NoNewline
     Draw-ProgressBar $false
     Write-Host ""
 }
@@ -99,7 +99,7 @@ function Draw-ProgressBar {
     $filled = [math]::Max(0, [math]::Round($barWidth * $filledStep / $Script:ProgressTotal))
     $empty = $barWidth - $filled
     
-    $bar = "[" + ("Γûê" * $filled) + ("Γûæ" * $empty) + "]"
+    $bar = "[" + ("#" * $filled) + ("." * $empty) + "]"
     Write-Host "$bar $percent%" -NoNewline
 }
 
@@ -109,7 +109,7 @@ function Set-StepDone {
     )
     Draw-ProgressBar -AfterStep
     Write-Host ""
-    Write-Host "  Γ£ô $Summary"
+    Write-Host "  OK $Summary"
 }
 
 function Set-StepFailed {
@@ -118,7 +118,7 @@ function Set-StepFailed {
     )
     Draw-ProgressBar -AfterStep
     Write-Host ""
-    Write-Host "  Γ£ù $Summary"
+    Write-Host "  FAIL $Summary"
 }
 
 # ====================================================================

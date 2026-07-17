@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 
 # clawde installer - Linux / WSL
 
@@ -168,7 +168,7 @@ _redraw_bar() {
 
   for ((i=0; i<empty; i++)); do bar+="Γûæ"; done
 
-  printf "  Γû╕ %s... [%s] %d%%\n" "$PROGRESS_LABEL" "$bar" "$percent"
+  printf "  > %s... [%s] %d%%\n" "$PROGRESS_LABEL" "$bar" "$percent"
 
 }
 
@@ -200,7 +200,7 @@ _draw_bar() {
 
 step_done() {
 
-  printf "\r\033[K  Γ£ô "
+  printf "OK "
 
   _draw_bar $PROGRESS_CURRENT
 
@@ -212,7 +212,7 @@ step_done() {
 
 step_fail() {
 
-  printf "\r\033[K  Γ£ù "
+  printf "FAIL "
 
   _draw_bar $PROGRESS_CURRENT
 
