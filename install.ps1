@@ -142,6 +142,8 @@ Environment variables (overrides for -Yes / CI mode):
   CLAWDE_CLI_TOKEN_PATH  Path to Claude CLI token file
   CLAWDE_AUTO_START   Auto-start on login: true | false (default: false)
   CLAWDE_MODELS       Models to expose (default: all)
+  HTTPS_PROXY         HTTPS proxy URL for downloads (e.g. http://proxy:8080)
+  HTTP_PROXY          HTTP proxy URL for downloads (fallback)
 
 Examples:
   .\install.ps1                  Interactive installation
@@ -436,6 +438,96 @@ function Setup-Path {
 }
 
 # ====================================================================
+# Robust download with multiple HTTP backends
+# Handles corporate proxies, TLS issues, etc.
+# ====================================================================
+function Download-File {
+    param(
+        [string]$Url,
+        [string]$OutFile,
+        [int]$TimeoutSeconds = 90
+    )
+
+    # Force TLS 1.2+ (many corporate proxies require this)
+    try {
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
+    } catch {
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12
+    }
+
+    Write-DebugMsg "Download-File: $Url -> $OutFile"
+
+    # --- Method 1: Invoke-WebRequest (PowerShell built-in) with proxy ---
+    $proxyUri = $null
+    if ($env:HTTPS_PROXY) { $proxyUri = $env:HTTPS_PROXY }
+    elseif ($env:https_proxy) { $proxyUri = $env:https_proxy }
+    elseif ($env:HTTP_PROXY) { $proxyUri = $env:HTTP_PROXY }
+    elseif ($env:http_proxy) { $proxyUri = $env:http_proxy }
+
+    $iwrParams = @{
+        Uri = $Url
+        OutFile = $OutFile
+        UseBasicParsing = $true
+        TimeoutSec = $TimeoutSeconds
+        ErrorAction = "Stop"
+    }
+    if ($proxyUri) {
+        $iwrParams.Proxy = $proxyUri
+        Write-DebugMsg "  Using proxy: $proxyUri"
+        # If proxy uses default credentials (corporate SSO)
+        $iwrParams.ProxyUseDefaultCredentials = $true
+    }
+
+    try {
+        Write-DebugMsg "  Trying Invoke-WebRequest..."
+        Invoke-WebRequest @iwrParams
+        if ((Get-Item $OutFile).Length -gt 0kb) { return $true }
+    } catch {
+        Write-DebugMsg "  Invoke-WebRequest failed: $($_.Exception.Message)"
+        # Cleanup partial download
+        Remove-Item $OutFile -ErrorAction SilentlyContinue
+    }
+
+    # --- Method 2: curl.exe (native Windows 10+ curl, NOT PS alias) ---
+    $curlExe = Get-Command curl.exe -ErrorAction SilentlyContinue
+    if ($curlExe) {
+        try {
+            Write-DebugMsg "  Trying curl.exe..."
+            $curlArgs = @("-sL", "-o", $OutFile, "--connect-timeout", "30", "--max-time", $TimeoutSeconds)
+            if ($proxyUri) { $curlArgs += "-x", $proxyUri }
+            $curlArgs += $Url
+            & $curlExe.Source $curlArgs 2>&1 | Out-Null
+            if ((Get-Item $OutFile -ErrorAction SilentlyContinue).Length -gt 0kb) {
+                Write-DebugMsg "  curl.exe succeeded"
+                return $true
+            }
+        } catch {
+            Write-DebugMsg "  curl.exe failed: $($_.Exception.Message)"
+            Remove-Item $OutFile -ErrorAction SilentlyContinue
+        }
+    }
+
+    # --- Method 3: WebClient (different HTTP stack than Invoke-WebRequest) ---
+    try {
+        Write-DebugMsg "  Trying WebClient..."
+        $wc = New-Object System.Net.WebClient
+        if ($proxyUri) {
+            $wc.Proxy = New-Object System.Net.WebProxy($proxyUri, $true)
+            $wc.Proxy.Credentials = [System.Net.CredentialCache]::DefaultNetworkCredentials
+        }
+        $wc.Headers.Add("User-Agent", "clawde-installer/0.1.0")
+        $wc.DownloadFile($Url, $OutFile)
+        if ((Get-Item $OutFile).Length -gt 0kb) { return $true }
+    } catch {
+        Write-DebugMsg "  WebClient failed: $($_.Exception.Message)"
+        Remove-Item $OutFile -ErrorAction SilentlyContinue
+    }
+
+    Write-DebugMsg "  All download methods failed for: $Url"
+    return $false
+}
+
+# ====================================================================
 # Install OpenCode
 # ====================================================================
 function Install-OpenCode {
@@ -458,6 +550,9 @@ function Install-OpenCode {
     }
     catch {
         Write-Warn "Could not fetch latest release: $($_.Exception.Message)"
+        if ($env:HTTPS_PROXY -or $env:http_proxy) {
+            Write-Warn "  Proxy detected - try setting HTTP_PROXY/HTTPS_PROXY if this persists"
+        }
         Write-Warn "Falling back to source build..."
         Install-OpenCodeFromSource
         return
@@ -478,33 +573,47 @@ function Install-OpenCode {
 
     New-Item -ItemType Directory -Path $Script:CLAWDE_BIN_DIR -Force | Out-Null
 
-    try {
-        Invoke-WebRequest -Uri $downloadUrl -OutFile $Script:OPENCODE_EXE -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
+    # Try primary download (with multiple HTTP methods for corporate proxy compat)
+    if (Download-File $downloadUrl $Script:OPENCODE_EXE) {
         Register-Rollback $Script:OPENCODE_EXE
         Set-StepDone "OpenCode $latestTag installed"
+        return
     }
-    catch {
-        Write-Warn "Binary download failed for release $latestTag ($binaryName)"
-        Write-Warn "HTTP error: $($_.Exception.Message)"
-        if (Test-Path $Script:OPENCODE_EXE) { Remove-Item $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
 
-        # Try without .exe suffix or with different naming
-        $altName = "opencode-windows-$arch"
-        $altUrl = "https://github.com/$($Script:OPENCODE_REPO)/releases/download/$latestTag/$altName"
-        Write-DebugMsg "Retrying with: $altUrl"
-        try {
-            Invoke-WebRequest -Uri $altUrl -OutFile $Script:OPENCODE_EXE -UseBasicParsing -TimeoutSec 60 -ErrorAction Stop
-            Register-Rollback $Script:OPENCODE_EXE
-            Set-StepDone "OpenCode $latestTag installed"
-            return
-        }
-        catch {
-            Write-Warn "Alternative download also failed: $($_.Exception.Message)"
-        }
+    # Try without .exe suffix
+    $altName = "opencode-windows-$arch"
+    $altUrl = "https://github.com/$($Script:OPENCODE_REPO)/releases/download/$latestTag/$altName"
+    Write-DebugMsg "Retrying with: $altUrl"
+    if (Download-File $altUrl $Script:OPENCODE_EXE) {
+        Register-Rollback $Script:OPENCODE_EXE
+        Set-StepDone "OpenCode $latestTag installed"
+        return
+    }
 
+    Write-Warn "Binary download failed for release $latestTag"
+    if (Test-Path $Script:OPENCODE_EXE) { Remove-Item $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
+
+    # Offer manual download URL before falling back to source build
+    Write-Host ""
+    Write-Info "You can download the binary manually:"
+    Write-Info "  $downloadUrl"
+    Write-Host ""
+    Write-Info "Save it to: $($Script:OPENCODE_EXE)"
+    Write-Host ""
+
+    if ($Script:Yes) {
         Write-Warn "Falling back to source build..."
-        if (Test-Path $Script:OPENCODE_EXE) { Remove-Item $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
         Install-OpenCodeFromSource
+    }
+    else {
+        $choice = Read-Host "  Try source build? [y/N] or press Enter to skip OpenCode"
+        if ($choice -match "^[Yy]") {
+            Install-OpenCodeFromSource
+        }
+        else {
+            Write-Info "Skipping OpenCode installation. You can install it manually later."
+            Set-StepDone "OpenCode skipped (manual install)"
+        }
     }
 }
 
