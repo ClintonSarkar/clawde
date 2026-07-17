@@ -565,54 +565,106 @@ function Install-OpenCode {
         return
     }
 
-    # Try downloading the binary
-    $binaryName = "opencode-windows-$arch.exe"
-    $downloadUrl = "https://github.com/$($Script:OPENCODE_REPO)/releases/download/$latestTag/$binaryName"
+    # OpenCode releases ship the Windows binary inside a ZIP file
+    # (no standalone .exe is published). Download and extract the ZIP.
+    $zipName = "opencode-windows-$arch.zip"
+    $downloadUrl = "https://github.com/$($Script:OPENCODE_REPO)/releases/download/$latestTag/$zipName"
+    $zipPath = Join-Path $env:TEMP "opencode-$latestTag-$arch.zip"
 
     Write-DebugMsg "Download URL: $downloadUrl"
 
     New-Item -ItemType Directory -Path $Script:CLAWDE_BIN_DIR -Force | Out-Null
 
-    # Try primary download (with multiple HTTP methods for corporate proxy compat)
-    if (Download-File $downloadUrl $Script:OPENCODE_EXE) {
-        Register-Rollback $Script:OPENCODE_EXE
-        Set-StepDone "OpenCode $latestTag installed"
+    # Download the ZIP
+    if (-not (Download-File $downloadUrl $zipPath)) {
+        # Try baseline variant for x64
+        if ($arch -eq "x64") {
+            $zipName = "opencode-windows-x64-baseline.zip"
+            $downloadUrl = "https://github.com/$($Script:OPENCODE_REPO)/releases/download/$latestTag/$zipName"
+            Write-DebugMsg "Retrying with baseline ZIP: $downloadUrl"
+            if (Download-File $downloadUrl $zipPath) {
+                $downloaded = $true
+            }
+        }
+    } else {
+        $downloaded = $true
+    }
+
+    if (-not $downloaded) {
+        Write-Warn "Download failed for release $latestTag (ZIP: $zipName)"
+        Write-Host ""
+        Write-Info "You can download manually from:"
+        Write-Info "  https://github.com/$($Script:OPENCODE_REPO)/releases/tag/$latestTag"
+        Write-Host ""
+        Write-Info "Download $zipName, extract opencode.exe, and save it to:"
+        Write-Info "  $($Script:OPENCODE_EXE)"
+        Write-Host ""
+        if ($Script:Yes) {
+            Write-Warn "Falling back to source build..."
+            Install-OpenCodeFromSource
+        } else {
+            $choice = Read-Host "  Try source build? [y/N] or press Enter to skip OpenCode"
+            if ($choice -match "^[Yy]") {
+                Install-OpenCodeFromSource
+            } else {
+                Write-Info "Skipping OpenCode installation. You can install it manually later."
+                Set-StepDone "OpenCode skipped (manual install)"
+            }
+        }
         return
     }
 
-    # Try without .exe suffix
-    $altName = "opencode-windows-$arch"
-    $altUrl = "https://github.com/$($Script:OPENCODE_REPO)/releases/download/$latestTag/$altName"
-    Write-DebugMsg "Retrying with: $altUrl"
-    if (Download-File $altUrl $Script:OPENCODE_EXE) {
+    # Extract the ZIP
+    $downloaded = $null
+    try {
+        $tempExtract = Join-Path $env:TEMP "opencode-extract-$([System.IO.Path]::GetRandomFileName())"
+        New-Item -ItemType Directory -Path $tempExtract -Force | Out-Null
+        Expand-Archive -Path $zipPath -DestinationPath $tempExtract -Force
+
+        # Find opencode.exe in the extracted files
+        $exe = Get-ChildItem $tempExtract -Recurse -Filter "opencode.exe" | Select-Object -First 1
+        if (-not $exe) {
+            throw "opencode.exe not found inside the ZIP archive"
+        }
+
+        Copy-Item $exe.FullName $Script:OPENCODE_EXE -Force
         Register-Rollback $Script:OPENCODE_EXE
+
+        # Cleanup
+        Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+
         Set-StepDone "OpenCode $latestTag installed"
-        return
     }
+    catch {
+        Remove-Item $tempExtract -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item $zipPath -Force -ErrorAction SilentlyContinue
+        if (Test-Path $Script:OPENCODE_EXE) { Remove-Item $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
 
-    Write-Warn "Binary download failed for release $latestTag"
-    if (Test-Path $Script:OPENCODE_EXE) { Remove-Item $Script:OPENCODE_EXE -Force -ErrorAction SilentlyContinue }
+        Write-Warn "Failed to extract OpenCode: $($_.Exception.Message)"
 
-    # Offer manual download URL before falling back to source build
-    Write-Host ""
-    Write-Info "You can download the binary manually:"
-    Write-Info "  $downloadUrl"
-    Write-Host ""
-    Write-Info "Save it to: $($Script:OPENCODE_EXE)"
-    Write-Host ""
+        # Offer manual download URL before falling back to source build
+        Write-Host ""
+        Write-Info "You can download manually from:"
+        Write-Info "  https://github.com/$($Script:OPENCODE_REPO)/releases/tag/$latestTag"
+        Write-Host ""
+        Write-Info "Download $zipName, extract opencode.exe, and save it to:"
+        Write-Info "  $($Script:OPENCODE_EXE)"
+        Write-Host ""
 
-    if ($Script:Yes) {
-        Write-Warn "Falling back to source build..."
-        Install-OpenCodeFromSource
-    }
-    else {
-        $choice = Read-Host "  Try source build? [y/N] or press Enter to skip OpenCode"
-        if ($choice -match "^[Yy]") {
+        if ($Script:Yes) {
+            Write-Warn "Falling back to source build..."
             Install-OpenCodeFromSource
         }
         else {
-            Write-Info "Skipping OpenCode installation. You can install it manually later."
-            Set-StepDone "OpenCode skipped (manual install)"
+            $choice = Read-Host "  Try source build? [y/N] or press Enter to skip OpenCode"
+            if ($choice -match "^[Yy]") {
+                Install-OpenCodeFromSource
+            }
+            else {
+                Write-Info "Skipping OpenCode installation. You can install it manually later."
+                Set-StepDone "OpenCode skipped (manual install)"
+            }
         }
     }
 }
