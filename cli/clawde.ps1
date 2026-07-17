@@ -240,14 +240,34 @@ function Install-PluginCCProxy {
         }
     }
 
-    $shim = Get-Command ccproxy -ErrorAction SilentlyContinue
-    if (-not $shim) { return $false }
-
-    # Wire it into clawde bin dir as ccproxy.cmd
+    # Remove old standalone binary FIRST so Get-Command finds the pipx entry point
     $ccproxyExe = Join-Path $BinDir "ccproxy.exe"
     $shimCmd = Join-Path $BinDir "ccproxy.cmd"
     if (Test-Path $ccproxyExe) { Remove-Item $ccproxyExe -Force -ErrorAction SilentlyContinue }
-    $shimPath = $shim.Source
+    if (Test-Path $shimCmd)    { Remove-Item $shimCmd -Force -ErrorAction SilentlyContinue }
+
+    # Find the pipx-installed ccproxy (now that old binary is gone, PATH lookup works)
+    $pipxCcproxy = Get-Command ccproxy -ErrorAction SilentlyContinue
+    if (-not $pipxCcproxy) {
+        # pipx may install to %APPDATA%\Python\Scripts or %LOCALAPPDATA%\pipx\bin
+        $pipxDirs = @(
+            Join-Path $env:APPDATA "Python\Scripts",
+            Join-Path $env:LOCALAPPDATA "pipx\bin"
+        )
+        foreach ($dir in $pipxDirs) {
+            $candidate = Join-Path $dir "ccproxy.exe"
+            if (Test-Path $candidate) { $pipxCcproxy = Get-Command $candidate; break }
+            $candidate = Join-Path $dir "ccproxy.cmd"
+            if (Test-Path $candidate) { $pipxCcproxy = Get-Command $candidate; break }
+        }
+    }
+    if (-not $pipxCcproxy) {
+        Write-Host "  [WARN] pipx install succeeded but ccproxy not found on PATH" -ForegroundColor Yellow
+        return $false
+    }
+
+    # Create .cmd shim pointing to the pipx entry point
+    $shimPath = $pipxCcproxy.Source
     $shimContent = "@echo off`r`n`"$shimPath`" %*`r`n"
     Set-Content -Path $shimCmd -Value $shimContent -Encoding ASCII -Force
 
@@ -382,9 +402,16 @@ function Test-CCProxyBinary {
     param([string]$BinaryPath)
     # Returns $true if the binary is executable and responds to --version
     try {
-        $null = & $BinaryPath --version 2>&1
-        return ($LASTEXITCODE -eq 0)
+        # Use Start-Process with timeout to avoid hanging
+        $tmpOut = Join-Path $env:TEMP "ccproxy_ver_$PID.out"
+        $tmpErr = Join-Path $env:TEMP "ccproxy_ver_$PID.err"
+        $p = Start-Process -FilePath $BinaryPath -ArgumentList "--version" -NoNewWindow -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
+        $p | Wait-Process -Timeout 8 -ErrorAction SilentlyContinue | Out-Null
+        if (-not $p.HasExited) { $p.Kill(); Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue; return $false }
+        Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
+        return ($p.ExitCode -eq 0)
     } catch {
+        Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
         return $false
     }
 }
@@ -427,6 +454,23 @@ function Repair-CCProxy {
     return $false
 }
 
+function Invoke-CCProxyWithTimeout {
+    param([string]$BinaryPath, [string[]]$ArgumentList, [int]$TimeoutSeconds = 10)
+    $tmpOut = Join-Path $env:TEMP "ccproxy_out_$PID.txt"
+    try {
+        $p = Start-Process -FilePath $BinaryPath -ArgumentList $ArgumentList -NoNewWindow -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpOut
+        $p | Wait-Process -Timeout $TimeoutSeconds -ErrorAction SilentlyContinue | Out-Null
+        if (-not $p.HasExited) {
+            $p.Kill()
+            return $null, $null, $true  # timed out
+        }
+        $output = Get-Content $tmpOut -Raw
+        return $output, $p.ExitCode, $false  # output, exitcode, timedout
+    } finally {
+        Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Cmd-Auth {
     Write-Host "[INFO] Starting Claude OAuth flow..." -ForegroundColor Cyan
     Write-Host "  A browser window will open for you to log in."
@@ -467,8 +511,10 @@ function Cmd-Auth {
     $ccproxyConfigFile = Join-Path $ccproxyConfigDir "ccproxy.config.settings"
     if (-not (Test-Path $ccproxyConfigFile)) {
         Write-Host "  [INFO] Initializing CCProxy config (first-time setup)..." -ForegroundColor Yellow
-        $initOutput = & $ccproxy config init --output-dir $ccproxyConfigDir 2>&1 | Out-String
-        if ($LASTEXITCODE -ne 0) {
+        $initOut, $initCode, $initTimedOut = Invoke-CCProxyWithTimeout -BinaryPath $ccproxy -ArgumentList @("config", "init", "--output-dir", $ccproxyConfigDir) -TimeoutSeconds 10
+        if ($initTimedOut) {
+            Write-Host "  [WARN] ccproxy config init timed out (continuing with defaults)" -ForegroundColor Yellow
+        } elseif ($initCode -ne 0) {
             Write-Host "  [WARN] ccproxy config init had warnings (continuing)" -ForegroundColor Yellow
         }
     }
@@ -487,7 +533,8 @@ function Cmd-Auth {
             Write-Host ""
             Write-Host "  [INFO] Plugin-enabled ccproxy installed. Re-running auth..." -ForegroundColor Cyan
             $ccproxy = Find-Binary "ccproxy.exe"
-            & $ccproxy config init --output-dir $ccproxyConfigDir 2>&1 | Out-Null
+            # Config init with timeout
+            $initOut2, $initCode2, $initTimedOut2 = Invoke-CCProxyWithTimeout -BinaryPath $ccproxy -ArgumentList @("config", "init", "--output-dir", $ccproxyConfigDir) -TimeoutSeconds 10
             $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
             if ($LASTEXITCODE -eq 0) {
                 Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
