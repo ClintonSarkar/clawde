@@ -747,6 +747,38 @@ function Install-CCProxy {
             Write-Warn "Install Python 3.11+ and pipx, then run: pipx install ccproxy-api[plugins-claude,plugins-codex]"
             Write-Warn "Then re-run this installer to wire it into the clawde bin dir."
         }
+        # Try to install Python + pipx + ccproxy-api plugins automatically
+        $pipxOk = $false
+        $py = $null
+        if (Test-PipxAvailable) {
+            Write-Info "pipx found — installing ccproxy-api with plugins..."
+            $pipxOk = [bool](Install-CCProxyViaPipx)
+        }
+
+        if (-not $pipxOk) {
+            # Try Python without pipx
+            if (Test-Python311 ([ref]$py)) {
+                Write-Info "Python found — installing pipx and ccproxy-api..."
+                if (Install-Pipx $py) {
+                    $pipxOk = [bool](Install-CCProxyViaPipx)
+                }
+            } else {
+                # Offer to install Python
+                Write-Info "Python 3.11+ not found — offering to install it for OAuth support..."
+                $pyPath = Install-Python311
+                if ($pyPath) {
+                    if (Install-Pipx $pyPath) {
+                        $pipxOk = [bool](Install-CCProxyViaPipx)
+                    }
+                }
+            }
+        }
+
+        if ($pipxOk) {
+            Set-StepDone "CCProxy installed via pipx (full plugin set)"
+            return
+        }
+
         # If we get here, still download the latest binary (it can serve even without auth plugins).
         # The ccproxy.exe binary itself works fine — only the OAuth plugin is missing.
         Write-Warn "Continuing to download latest ccproxy.exe binary (auth plugins only needed for 'clawde auth')"
@@ -891,6 +923,88 @@ function Test-PipxAvailable {
     } catch {
         return $false
     }
+}
+
+# Check for Python 3.11+. Returns $true and sets $pyPath.Value to the python executable.
+function Test-Python311 {
+    param([ref]$pyPath)
+    foreach ($candidate in @('py', 'python', 'python3')) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if (-not $cmd) { continue }
+        try {
+            $ver = & $cmd.Source --version 2>&1
+            if ($ver -match 'Python (\d+)\.(\d+)') {
+                $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+                if ($major -ge 3 -and $minor -ge 11) {
+                    $pyPath.Value = $cmd.Source
+                    return $true
+                }
+            }
+        } catch {}
+    }
+    return $false
+}
+
+# Download and install Python 3.11+ if missing. Returns path to python executable, or $null.
+function Install-Python311 {
+    # Offer to download Python
+    $choice = Read-Host "  Download and install Python 3.11 now? [Y/n]"
+    if ($choice -match '^[Nn]') {
+        Write-Info "You can install manually from: https://www.python.org/downloads/"
+        return $null
+    }
+
+    $pythonUrl = "https://www.python.org/ftp/python/3.11.11/python-3.11.11-amd64.exe"
+    $installerPath = Join-Path $env:TEMP "python-3.11.11-amd64.exe"
+
+    Write-Info "Downloading Python 3.11 installer..."
+    try {
+        if (-not (Download-File $pythonUrl $installerPath)) {
+            Write-Err "Failed to download Python installer"
+            return $null
+        }
+    } catch {
+        Write-Err "Failed to download Python: $($_.Exception.Message)"
+        return $null
+    }
+
+    Write-Info "Installing Python 3.11 (user-wide)..."
+    $proc = Start-Process -FilePath $installerPath -ArgumentList "/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1" -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        Write-Err "Python installer failed (exit code $($proc.ExitCode))"
+        return $null
+    }
+
+    # Refresh PATH for this session
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
+
+    $py = $null
+    if (Test-Python311 ([ref]$py)) {
+        Write-Info "Python 3.11+ installed at $py"
+        return $py
+    }
+    Write-Warn "Python installed but not found on PATH. Restart your terminal and try again."
+    return $null
+}
+
+# Install pipx via python -m pip if not already available. Returns $true on success.
+function Install-Pipx {
+    param([string]$pythonExe)
+    $pipx = Get-Command pipx -ErrorAction SilentlyContinue
+    if ($pipx) { return $true }
+
+    Write-Info "Installing pipx..."
+    $output = & $pythonExe -m pip install pipx 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) {
+        $pipxScriptDir = Join-Path $env:APPDATA "Python\Scripts"
+        if (Test-Path (Join-Path $pipxScriptDir "pipx.exe")) {
+            $env:Path = "$pipxScriptDir;$env:Path"
+        }
+        Write-Info "pipx installed"
+        return $true
+    }
+    Write-Warn "pipx install failed: $output"
+    return $false
 }
 
 # Install ccproxy-api with full plugin set via pipx, then copy the resulting

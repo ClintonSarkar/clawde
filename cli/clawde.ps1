@@ -119,6 +119,142 @@ function Get-ProxyHost($config) {
     return $host_
 }
 
+# --- Auth plugin helpers (for ccproxy Windows binary without bundled plugins) ---
+
+function Test-Python311([ref]$pyPath) {
+    # Check for Python 3.11+; returns $true and sets $pyPath.Value
+    foreach ($candidate in @('py', 'python', 'python3')) {
+        $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
+        if (-not $cmd) { continue }
+        try {
+            $ver = & $cmd.Source --version 2>&1
+            if ($ver -match 'Python (\d+)\.(\d+)') {
+                $major = [int]$Matches[1]; $minor = [int]$Matches[2]
+                if ($major -ge 3 -and $minor -ge 11) {
+                    $pyPath.Value = $cmd.Source
+                    return $true
+                }
+            }
+        } catch {}
+    }
+    return $false
+}
+
+function Ensure-Python {
+    # Returns path to a Python 3.11+ executable, or $null.
+    # If none is found, offers to download and install it.
+    $py = $null
+    if (Test-Python311 ([ref]$py)) { return $py }
+
+    Write-Host ""
+    Write-Host "  Python 3.11+ is required for Claude OAuth support." -ForegroundColor Yellow
+    $choice = Read-Host "  Download and install Python 3.11 now? [Y/n]"
+    if ($choice -match '^[Nn]') {
+        Write-Host "  You can install it manually from: https://www.python.org/downloads/" -ForegroundColor Cyan
+        return $null
+    }
+
+    $pythonUrl = "https://www.python.org/ftp/python/3.11.11/python-3.11.11-amd64.exe"
+    $installerPath = Join-Path $env:TEMP "python-3.11.11-amd64.exe"
+
+    Write-Host "  [INFO] Downloading Python 3.11 installer..." -ForegroundColor Yellow
+    try {
+        # Try Invoke-WebRequest first, fall back to WebClient
+        Invoke-WebRequest -Uri $pythonUrl -OutFile $installerPath -UseBasicParsing -TimeoutSec 120 -ErrorAction Stop
+    } catch {
+        try {
+            $wc = New-Object System.Net.WebClient
+            [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.SecurityProtocolType]::Tls12 -bor [System.Net.SecurityProtocolType]::Tls13
+            $wc.DownloadFile($pythonUrl, $installerPath)
+        } catch {
+            Write-Host "  [ERROR] Failed to download Python: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  Download from: https://www.python.org/downloads/" -ForegroundColor Cyan
+            return $null
+        }
+    }
+
+    Write-Host "  [INFO] Installing Python 3.11 (user-wide)..." -ForegroundColor Yellow
+    $proc = Start-Process -FilePath $installerPath -ArgumentList "/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1" -Wait -PassThru -NoNewWindow
+    if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
+        Write-Host "  [ERROR] Python installer failed (exit code $($proc.ExitCode))" -ForegroundColor Red
+        # 3010 means reboot required — still succeeded
+        if ($proc.ExitCode -eq 3010) {
+            Write-Host "  [WARN] Python installed but a reboot is recommended" -ForegroundColor Yellow
+        } else {
+            return $null
+        }
+    }
+
+    # Refresh PATH for this session
+    $env:Path = [Environment]::GetEnvironmentVariable("Path", "User") + ";" + [Environment]::GetEnvironmentVariable("Path", "Machine")
+
+    $py = $null
+    if (Test-Python311 ([ref]$py)) {
+        Write-Host "  [OK] Python 3.11+ installed at $py" -ForegroundColor Green
+        return $py
+    }
+    Write-Host "  [ERROR] Python installed but not found on PATH. Restart your terminal and try again." -ForegroundColor Red
+    return $null
+}
+
+function Ensure-Pipx($pythonExe) {
+    # Ensure pipx is installed via the given python executable.
+    # Returns $true if pipx is available after this call.
+    $pipx = Get-Command pipx -ErrorAction SilentlyContinue
+    if ($pipx) { return $true }
+
+    Write-Host "  [INFO] Installing pipx..." -ForegroundColor Yellow
+    try {
+        $output = & $pythonExe -m pip install pipx 2>&1 | Out-String
+        if ($LASTEXITCODE -eq 0) {
+            # pipx installs scripts to %APPDATA%\Python\Scripts under the user scheme
+            $pipxScriptDir = Join-Path $env:APPDATA "Python\Scripts"
+            if (Test-Path (Join-Path $pipxScriptDir "pipx.exe")) {
+                $env:Path = "$pipxScriptDir;$env:Path"
+            }
+            Write-Host "  [OK] pipx installed" -ForegroundColor Green
+            return $true
+        }
+    } catch {}
+
+    Write-Host "  [WARN] pipx install failed" -ForegroundColor Yellow
+    Write-Host "  Try: $pythonExe -m pip install pipx" -ForegroundColor Cyan
+    return $false
+}
+
+function Install-PluginCCProxy {
+    # Install ccproxy-api with plugins via pipx, then wire a .cmd shim into clawde\bin.
+    # Returns $true on success.
+    $pipx = Get-Command pipx -ErrorAction SilentlyContinue
+    if (-not $pipx) { return $false }
+
+    Write-Host "  [INFO] Installing ccproxy-api with plugins via pipx..." -ForegroundColor Yellow
+    $installOut = & pipx install "ccproxy-api[plugins-claude,plugins-codex]" 2>&1 | Out-String
+    if ($LASTEXITCODE -ne 0) {
+        # May already be installed — try upgrade
+        & pipx upgrade ccproxy-api 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [WARN] pipx install/upgrade failed" -ForegroundColor Yellow
+            Write-Host "  $installOut" -ForegroundColor DarkGray
+            return $false
+        }
+    }
+
+    $shim = Get-Command ccproxy -ErrorAction SilentlyContinue
+    if (-not $shim) { return $false }
+
+    # Wire it into clawde bin dir as ccproxy.cmd
+    $ccproxyExe = Join-Path $BinDir "ccproxy.exe"
+    $shimCmd = Join-Path $BinDir "ccproxy.cmd"
+    if (Test-Path $ccproxyExe) { Remove-Item $ccproxyExe -Force -ErrorAction SilentlyContinue }
+    $shimPath = $shim.Source
+    $shimContent = "@echo off`r`n`"$shimPath`" %*`r`n"
+    Set-Content -Path $shimCmd -Value $shimContent -Encoding ASCII -Force
+
+    Write-Host "  [OK] ccproxy-api installed via pipx" -ForegroundColor Green
+    return $true
+}
+
 # --- Commands ---
 
 function Cmd-Start($extraArgs) {
@@ -263,53 +399,63 @@ function Cmd-Auth {
         # Check if any auth providers are available before attempting login
         $providersCheck = & $ccproxy auth providers 2>&1 | Out-String
         if ($providersCheck -match 'No OAuth providers found') {
-            Write-Host "[ERROR] No auth providers installed in this CCProxy release" -ForegroundColor Red
-            Write-Host "  This Windows binary was built without plugin support." -ForegroundColor Yellow
             Write-Host ""
-            Write-Host "  To fix this, install ccproxy-api with plugins via pipx:" -ForegroundColor Cyan
-            $pyCmd = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python" }
-            Write-Host "" -ForegroundColor Cyan
-            Write-Host "    pipx install \"ccproxy-api[plugins-claude,plugins-codex]\"" -ForegroundColor White
-            Write-Host ""
-            Write-Host "  This will install a full-featured version with Claude OAuth support." -ForegroundColor Cyan
+            Write-Host "  [WARN] This CCProxy binary was built without auth plugin support." -ForegroundColor Yellow
+            Write-Host "  Installing ccproxy-api with plugins for full OAuth support..." -ForegroundColor Cyan
             Write-Host ""
 
-            # Offer to do it automatically
-            $pipxExists = [bool](Get-Command pipx -ErrorAction SilentlyContinue)
-            $pyExists = [bool](Get-Command py -ErrorAction SilentlyContinue) -or [bool](Get-Command python -ErrorAction SilentlyContinue)
+            # Try: pipx already available
+            $installed = $false
+            $pipx = Get-Command pipx -ErrorAction SilentlyContinue
+            if ($pipx) {
+                Write-Host "  [INFO] pipx found — installing ccproxy-api with plugins..." -ForegroundColor Cyan
+                $installed = Install-PluginCCProxy
+            }
 
-            if ($pipxExists -and $pyExists) {
-                $fix = Read-Host "  Auto-install via pipx? [y/N]"
-                if ($fix -match "^[Yy]") {
-                    Write-Host "  Installing ccproxy-api with plugins..." -ForegroundColor Yellow
-                    $installOut = & pipx install "ccproxy-api[plugins-claude,plugins-codex]" 2>&1 | Out-String
-                    if ($LASTEXITCODE -eq 0) {
-                        $shimPath = (Get-Command ccproxy -ErrorAction SilentlyContinue).Source
-                        if ($shimPath) {
-                            $ccproxyShim = Join-Path (Split-Path $ccproxy -Parent) "ccproxy.cmd"
-                            $shimContent = "@echo off`r`n`"$shimPath`" %*`r`n"
-                            Set-Content -Path $ccproxyShim -Value $shimContent -Encoding ASCII -Force
-                            Write-Host "  [OK] ccproxy-api installed via pipx" -ForegroundColor Green
-                            # Retry auth
-                            $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
-                            if ($LASTEXITCODE -eq 0) {
-                                Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
-                                return
-                            }
-                        }
-                    } else {
-                        Write-Host "  [WARN] pipx install failed" -ForegroundColor Yellow
-                        Write-Host "  $installOut" -ForegroundColor DarkGray
-                        Write-Host ""
-                        Write-Host "  Try manually:" -ForegroundColor Cyan
-                        Write-Host "    pipx install \"ccproxy-api[plugins-claude,plugins-codex]\"" -ForegroundColor White
-                        exit 1
+            # Try: Python available but not pipx -> install pipx first
+            if (-not $installed) {
+                $py = $null
+                if (Test-Python311 ([ref]$py)) {
+                    Write-Host "  [INFO] Python found at $py — installing pipx and ccproxy-api..." -ForegroundColor Cyan
+                    if (Ensure-Pipx $py) {
+                        $installed = Install-PluginCCProxy
                     }
                 }
-            } else {
-                Write-Host "  Python 3.11+ and pipx are required for the plugin-enabled version." -ForegroundColor Yellow
-                Write-Host "  Install from: https://github.com/pypa/pipx#install-pipx" -ForegroundColor Cyan
             }
+
+            # Try: No Python -> offer to download and install
+            if (-not $installed) {
+                $pythonPath = Ensure-Python
+                if ($pythonPath) {
+                    if (Ensure-Pipx $pythonPath) {
+                        $installed = Install-PluginCCProxy
+                    }
+                }
+            }
+
+            if ($installed) {
+                Write-Host ""
+                Write-Host "  [INFO] Plugin-enabled ccproxy installed. Re-running auth..." -ForegroundColor Cyan
+                # Find the new ccproxy (via .cmd shim)
+                $ccproxy = Find-Binary "ccproxy.exe"
+                # Re-init config (new binary may have different defaults)
+                & $ccproxy config init --output-dir $ccproxyConfigDir 2>&1 | Out-Null
+                $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
+                if ($LASTEXITCODE -eq 0) {
+                    Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
+                    return
+                }
+            }
+
+            Write-Host ""
+            Write-Host "  [ERROR] Could not install auth plugins automatically." -ForegroundColor Red
+            Write-Host ""
+            Write-Host "  To fix this manually:" -ForegroundColor Cyan
+            Write-Host "    1. Install Python 3.11+ from: https://www.python.org/downloads/" -ForegroundColor White
+            Write-Host "    2. Run: python -m pip install pipx" -ForegroundColor White
+            Write-Host "    3. Run: pipx install \"ccproxy-api[plugins-claude,plugins-codex]\"" -ForegroundColor White
+            Write-Host "    4. Re-run: clawde auth" -ForegroundColor White
+            Write-Host ""
             exit 1
         }
 
