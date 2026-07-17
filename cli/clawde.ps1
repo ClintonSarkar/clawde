@@ -261,11 +261,55 @@ function Cmd-Auth {
         }
 
         # Check if any auth providers are available before attempting login
-        $providersCheck = & $ccproxy auth providers 2>$null | Out-String
+        $providersCheck = & $ccproxy auth providers 2>&1 | Out-String
         if ($providersCheck -match 'No OAuth providers found') {
             Write-Host "[ERROR] No auth providers installed in this CCProxy release" -ForegroundColor Red
-            Write-Host "  This usually means the claude plugin is missing from the binary." -ForegroundColor Yellow
-            Write-Host "  Check: https://github.com/ClintonSarkar/ccproxy-api/releases" -ForegroundColor Gray
+            Write-Host "  This Windows binary was built without plugin support." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "  To fix this, install ccproxy-api with plugins via pipx:" -ForegroundColor Cyan
+            $pyCmd = if (Get-Command py -ErrorAction SilentlyContinue) { "py" } else { "python" }
+            Write-Host "" -ForegroundColor Cyan
+            Write-Host "    pipx install \"ccproxy-api[plugins-claude,plugins-codex]\"" -ForegroundColor White
+            Write-Host ""
+            Write-Host "  This will install a full-featured version with Claude OAuth support." -ForegroundColor Cyan
+            Write-Host ""
+
+            # Offer to do it automatically
+            $pipxExists = [bool](Get-Command pipx -ErrorAction SilentlyContinue)
+            $pyExists = [bool](Get-Command py -ErrorAction SilentlyContinue) -or [bool](Get-Command python -ErrorAction SilentlyContinue)
+
+            if ($pipxExists -and $pyExists) {
+                $fix = Read-Host "  Auto-install via pipx? [y/N]"
+                if ($fix -match "^[Yy]") {
+                    Write-Host "  Installing ccproxy-api with plugins..." -ForegroundColor Yellow
+                    $installOut = & pipx install "ccproxy-api[plugins-claude,plugins-codex]" 2>&1 | Out-String
+                    if ($LASTEXITCODE -eq 0) {
+                        $shimPath = (Get-Command ccproxy -ErrorAction SilentlyContinue).Source
+                        if ($shimPath) {
+                            $ccproxyShim = Join-Path (Split-Path $ccproxy -Parent) "ccproxy.cmd"
+                            $shimContent = "@echo off`r`n\"$shimPath\" %*`r`n"
+                            Set-Content -Path $ccproxyShim -Value $shimContent -Encoding ASCII -Force
+                            Write-Host "  [OK] ccproxy-api installed via pipx" -ForegroundColor Green
+                            # Retry auth
+                            $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
+                                return
+                            }
+                        }
+                    } else {
+                        Write-Host "  [WARN] pipx install failed" -ForegroundColor Yellow
+                        Write-Host "  $installOut" -ForegroundColor DarkGray
+                        Write-Host ""
+                        Write-Host "  Try manually:" -ForegroundColor Cyan
+                        Write-Host "    pipx install \"ccproxy-api[plugins-claude,plugins-codex]\"" -ForegroundColor White
+                        exit 1
+                    }
+                }
+            } else {
+                Write-Host "  Python 3.11+ and pipx are required for the plugin-enabled version." -ForegroundColor Yellow
+                Write-Host "  Install from: https://github.com/pypa/pipx#install-pipx" -ForegroundColor Cyan
+            }
             exit 1
         }
 

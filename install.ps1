@@ -726,11 +726,32 @@ function Install-CCProxy {
     $ccproxyExe = Join-Path $Script:CLAWDE_BIN_DIR "ccproxy.exe"
     if (Test-Path $ccproxyExe) {
         $ver = & $ccproxyExe --version 2>$null
-        Set-StepDone "CCProxy already installed ($ver)"
+        Write-DebugMsg "CCProxy already installed: $ccproxyExe ($ver)"
+        # Even if installed, check that it has auth providers
+        if (Test-CCProxyHasProviders $ccproxyExe) {
+            Set-StepDone "CCProxy already installed ($ver)"
+            return
+        }
+        Write-Warn "CCProxy binary is missing auth provider plugins (known upstream issue)"
+        Write-Warn "Upstream: https://github.com/CaddyGlow/ccproxy-api/issues/75"
+        # Try pipx fallback instead of re-downloading the same broken binary
+        if (Test-PipxAvailable) {
+            Write-Info "Replacing with pipx-installed ccproxy-api with plugins..."
+            $pipxPath = Install-CCProxyViaPipx
+            if ($pipxPath) {
+                Set-StepDone "CCProxy installed via pipx (full plugin set)"
+                return
+            }
+            Write-Warn "pipx install failed; you can retry later with: pipx install ccproxy-api[plugins-claude,plugins-codex]"
+        } else {
+            Write-Warn "Install Python 3.11+ and pipx, then run: pipx install ccproxy-api[plugins-claude,plugins-codex]"
+            Write-Warn "Then re-run this installer to wire it into the clawde bin dir."
+        }
+        # If we get here, skip the broken binary install
+        Write-Warn "Skipping CCProxy download (existing binary has no plugins)"
+        Set-StepDone "CCProxy skipped (use 'pipx install ccproxy-api[plugins-claude,plugins-codex]')"
         return
     }
-
-    # Fetch latest release info from upstream
     Write-DebugMsg "Fetching latest CCProxy release..."
     try {
         $release = Invoke-RestMethod -Uri "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" -TimeoutSec 15
