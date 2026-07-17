@@ -164,9 +164,9 @@ _redraw_bar() {
 
   bar=""
 
-  for ((i=0; i<filled; i++)); do bar+="Γûê"; done
+  for ((i=0; i<filled; i++)); do bar+="#"; done
 
-  for ((i=0; i<empty; i++)); do bar+="Γûæ"; done
+  for ((i=0; i<empty; i++)); do bar+="-"; done
 
   printf "  > %s... [%s] %d%%\n" "$PROGRESS_LABEL" "$bar" "$percent"
 
@@ -188,9 +188,9 @@ _draw_bar() {
 
   bar=""
 
-  for ((i=0; i<filled; i++)); do bar+="Γûê"; done
+  for ((i=0; i<filled; i++)); do bar+="#"; done
 
-  for ((i=0; i<empty; i++)); do bar+="Γûæ"; done
+  for ((i=0; i<empty; i++)); do bar+="-"; done
 
   printf "[%s] %d%%" "$bar" "$percent"
 
@@ -390,7 +390,7 @@ cleanup_on_exit() {
 
       # Only remove empty dirs we created, unless it's our config/data
 
-      if [[ "$item" == "$CLAWDE_CONFIG_DIR" ]] || [[ "$item" == "$CLAWDE_DATA_DIR" ]] || [[ "$item" == "$CLAWDE_BIN_DIR" ]]; then
+      if [[ "$item" == "$CLAWDE_CONFIG_DIR" ]] || [[ "$item" == "$CLAWDE_DATA_DIR" ]]; then
 
         rm -rf "$item" 2>/dev/null || true
 
@@ -550,7 +550,7 @@ check_deps() {
 
     local pyver
 
-    pyver="$(python --version 2>&1 | grep -oP "\d+\.\d+")"
+    pyver="$(python --version 2>&1 | sed -nE 's/[^0-9]*([0-9]+\.[0-9]+).*/\1/p')"
 
     if [[ "${pyver%%.*}" -ge 3 ]]; then
 
@@ -941,7 +941,8 @@ setup_path() {
 
   mkdir -p "$CLAWDE_BIN_DIR"
 
-  register_rollback "$CLAWDE_BIN_DIR"
+  # Do NOT register the shared bin dir (~/.local/bin) for rollback: it may hold
+  # unrelated tools. Rollback removes only the specific files we install into it.
 
 
 
@@ -1080,9 +1081,7 @@ install_opencode() {
   info "Checking GitHub releases for ${OPENCODE_REPO}..."
 
   latest_tag="$(curl -fsSL --connect-timeout 10 --max-time 30 \
-
     "https://api.github.com/repos/${OPENCODE_REPO}/releases/latest" \
-
     | grep -o '"tag_name": *"[^"]*"' | head -1 | cut -d'"' -f4)" || true
 
 
@@ -1298,7 +1297,6 @@ install_ccproxy() {
   local release_json
 
   release_json="$(curl -fsSL --connect-timeout 10 --max-time 15 \
-
     "https://api.github.com/repos/ClintonSarkar/ccproxy-api/releases/latest" 2>/dev/null)" || {
 
     warn "Failed to fetch CCProxy release info"
@@ -1327,7 +1325,7 @@ install_ccproxy() {
 
     Linux:x86_64)   asset_name="ccproxy-${tag_name}-x86_64-unknown-linux-gnu.tar.gz" ;;
 
-    Linux:aarch64)  asset_name="ccproxy-${tag_name}-x86_64-unknown-linux-gnu.tar.gz" ;;
+    Linux:aarch64)  asset_name="ccproxy-${tag_name}-aarch64-unknown-linux-gnu.tar.gz" ;;
 
     Darwin:x86_64)  asset_name="ccproxy-${tag_name}-x86_64-apple-darwin.tar.gz" ;;
 
@@ -1345,7 +1343,9 @@ install_ccproxy() {
 
   if [[ -z "$download_url" ]]; then
 
-    warn "CCProxy binary not found for platform in release $tag_name"
+    warn "No CCProxy binary published for $(uname -s) ${arch} in release $tag_name (looked for ${asset_name})"
+
+    warn "If you are on ARM with no ARM build available, install via pipx: pipx install \"ccproxy-api[plugins-claude,plugins-codex]\""
 
     return
 
@@ -1564,7 +1564,6 @@ install_cli() {
   debug "Downloading clawde.sh to ${clawde_path}..."
 
   if ! curl -fsSL --connect-timeout 10 --max-time 30 \
-
     "$clawde_url" -o "$clawde_path" 2>/dev/null; then
 
     warn "Failed to download clawde.sh"
@@ -1765,6 +1764,8 @@ write_config() {
 
 [proxy]
 
+# [active] read by 'clawde start' / 'status'.
+
 port = ${port}
 
 host = "127.0.0.1"
@@ -1772,6 +1773,8 @@ host = "127.0.0.1"
 
 
 [claude]
+
+# [reserved] not consumed yet - auth is always the browser OAuth flow.
 
 auth_method = "${auth_method}"
 
@@ -1781,7 +1784,9 @@ ${token_line}
 
 [opencode]
 
-provider_name = "clawde"
+# [active] controls boot/login auto-start of the proxy.
+
+# The provider itself (id "ccproxy-claude") is defined in opencode.json.
 
 auto_start = ${auto_start}
 
@@ -1789,11 +1794,15 @@ auto_start = ${auto_start}
 
 [models]
 
+# [reserved] not consumed yet.
+
 expose = "${models}"
 
 
 
 [logging]
+
+# [reserved] not consumed yet.
 
 level = "info"
 
@@ -1877,7 +1886,7 @@ setup_opencode_provider() {
 
       name: "CCProxy (Claude Max)",
 
-      options: { baseURL: "http://127.0.0.1:$port/api/v1" },
+      options: { baseURL: "http://127.0.0.1:\($port)/api/v1", apiKey: "clawde" },
 
       models: {
 
@@ -1931,7 +1940,7 @@ setup_service() {
 
   if [[ -f "$CLAWDE_CONFIG_FILE" ]]; then
 
-    auto_start="$(grep 'auto_start' "$CLAWDE_CONFIG_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d ' ' || echo "false")"
+    auto_start="$(grep -E '^[[:space:]]*auto_start[[:space:]]*=' "$CLAWDE_CONFIG_FILE" 2>/dev/null | head -1 | cut -d'=' -f2 | tr -d ' ' || echo "false")"
 
   elif [[ "$NONINTERACTIVE" == "true" ]]; then
 
@@ -2249,21 +2258,24 @@ uninstall() {
 
     if [[ -f "$rc" ]]; then
 
-      if grep -qsF "$CLAWDE_BIN_DIR" "$rc" 2>/dev/null; then
+      # Only act if the installer's OWN marker is present - not merely any line
+      # that mentions the bin dir (the user may have their own PATH entry).
+      if grep -qsF "# Added by clawde installer" "$rc" 2>/dev/null; then
 
         cp "$rc" "${rc}.clawde-backup"
 
-        # Remove the block added by the installer (comment line + path line)
+        # Remove ONLY the 2-line block the installer added (the comment plus the
+        # export line right after it). POSIX awk (universally present, and free
+        # of GNU/BSD sed -i differences).
 
-        sed -i "\|# Added by clawde installer|,+1 d" "$rc" 2>/dev/null || true
-
-        # Also remove any remaining reference (defensive)
-
-        sed -i "\|${CLAWDE_BIN_DIR}|d" "$rc" 2>/dev/null || true
-
-        ok "Removed PATH entry from ${rc} (backup saved to ${rc}.clawde-backup)"
-
-        removed_anything=true
+        if awk '/# Added by clawde installer/ { skip=1; next } skip { skip=0; next } { print }' "$rc" > "${rc}.clawde-tmp" 2>/dev/null; then
+          mv -f "${rc}.clawde-tmp" "$rc"
+          ok "Removed PATH entry from ${rc} (backup saved to ${rc}.clawde-backup)"
+          removed_anything=true
+        else
+          rm -f "${rc}.clawde-tmp"
+          warn "Could not clean PATH entry from ${rc}; remove the clawde block manually"
+        fi
 
       fi
 
@@ -2279,17 +2291,22 @@ uninstall() {
 
     if [[ -f "$rc" ]]; then
 
-      if grep -qs "clawde" "$rc" 2>/dev/null; then
+      # Match the installer's OWN marker, not any line mentioning clawde.
+      if grep -qsF "# Start clawde" "$rc" 2>/dev/null; then
 
         cp "$rc" "${rc}.clawde-backup"
 
-        sed -i "\|# Start clawde|,+1 d" "$rc" 2>/dev/null || true
+        # Remove ONLY the 2-line auto-start block the installer added; do not
+        # blanket-delete every "ccproxy serve" line (the user may have their own).
 
-        sed -i "\|ccproxy serve|d" "$rc" 2>/dev/null || true
-
-        ok "Removed auto-start entries from ${rc} (backup saved to ${rc}.clawde-backup)"
-
-        removed_anything=true
+        if awk '/# Start clawde/ { skip=1; next } skip { skip=0; next } { print }' "$rc" > "${rc}.clawde-tmp" 2>/dev/null; then
+          mv -f "${rc}.clawde-tmp" "$rc"
+          ok "Removed auto-start entries from ${rc} (backup saved to ${rc}.clawde-backup)"
+          removed_anything=true
+        else
+          rm -f "${rc}.clawde-tmp"
+          warn "Could not clean auto-start entries from ${rc}; remove the clawde block manually"
+        fi
 
       fi
 
@@ -2495,15 +2512,10 @@ main() {
       show_progress 4 6 "Claude authentication"
 
       write_config \
-
         "${CLAWDE_AUTH_METHOD:-oauth}" \
-
         "${CLAWDE_CLI_TOKEN_PATH:-}" \
-
         "${CLAWDE_PORT:-8080}" \
-
         "${CLAWDE_AUTO_START:-false}" \
-
         "${CLAWDE_MODELS:-all}"
 
     else

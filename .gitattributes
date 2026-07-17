@@ -1,3 +1,7 @@
-*.ps1 -text diff
-*.sh -text diff
-*.cmd -text diff
+# Shell scripts MUST be LF: they run on Linux/macOS/WSL and are served raw via
+# `curl | bash`. CRLF here makes bash choke on the trailing \r.
+*.sh text eol=lf
+
+# Windows scripts keep CRLF.
+*.ps1 text eol=crlf diff
+*.cmd text eol=crlf

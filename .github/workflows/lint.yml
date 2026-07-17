@@ -1,0 +1,25 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  shell:
+    name: Shell scripts parse + shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Regression guard: install.sh once shipped unparseable (broken line
+      # continuations). `bash -n` catches that class before it merges.
+      - name: bash -n (syntax check)
+        run: |
+          bash -n install.sh
+          bash -n cli/clawde.sh
+
+      - name: shellcheck
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck --severity=error install.sh cli/clawde.sh

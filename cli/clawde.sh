@@ -38,9 +38,14 @@ read_config() {
     [[ -z "$line" || "$line" == \#* ]] && continue
     if [[ "$line" =~ ^\[(.+)\]$ ]]; then
       section="${BASH_REMATCH[1]}"
-    elif [[ "$line" =~ ^([^#]+?)\s*=\s*(.*)$ ]] && [[ -n "$section" ]]; then
-      local key="${BASH_REMATCH[1]// /}"
-      local val="${BASH_REMATCH[2]//\"/}"
+    elif [[ "$line" =~ ^([^=#]+)=(.*)$ ]] && [[ -n "$section" ]]; then
+      # POSIX ERE only (no \s / lazy quantifiers): works on macOS/BSD bash too.
+      # The line was whitespace-trimmed above; trim any around the split parts.
+      local key="${BASH_REMATCH[1]//[[:space:]]/}"
+      local val="${BASH_REMATCH[2]}"
+      val="${val#"${val%%[![:space:]]*}"}"
+      val="${val%"${val##*[![:space:]]}"}"
+      val="${val//\"/}"
       val="${val//\'/}"
       echo "CLAWDE_CFG_${section}_${key}=\"${val}\""
     fi
@@ -148,8 +153,9 @@ cmd_start() {
     echo "[INFO] Starting OpenCode..."
     local opencode_bin
     opencode_bin="$(find_binary opencode)"
-    export OPENCODE_PROVIDER_CLAWDE_BASE_URL="http://${host}:${port}/v1"
-    export OPENCODE_PROVIDER_CLAWDE_API_KEY="***"
+    # The ccproxy-claude provider (baseURL + apiKey) is defined authoritatively
+    # in opencode.json by the installer; OpenCode reads it from there. Don't
+    # export a second, divergent provider definition via env vars here.
     "$opencode_bin" "${extra_args[@]}" &
     local oc_pid=$!
     write_pid opencode "$oc_pid"
@@ -385,7 +391,9 @@ self_update() {
     return
   fi
 
-  local tmp_file="/tmp/clawde-update.sh"
+  # Stage the download next to the target so the final swap is an atomic
+  # rename on the same filesystem.
+  local tmp_file="${this_script}.new.$$"
   if curl -fsSL --connect-timeout 10 --max-time 30 "$self_url" -o "$tmp_file" 2>/dev/null; then
     local remote_hash local_hash
     remote_hash="$(sha256sum "$tmp_file" 2>/dev/null | awk '{print $1}')"
@@ -396,12 +404,15 @@ self_update() {
       rm -f "$tmp_file"
     else
       cp "$this_script" "${this_script}.bak"
-      cp "$tmp_file" "$this_script"
-      rm -f "$tmp_file"
-      chmod +x "$this_script"
-      echo "  [OK] clawde CLI updated (backup: ${this_script}.bak)"
+      chmod +x "$tmp_file"
+      # Atomic rename over the running script: replaces the inode instead of
+      # truncating the one the current shell is still reading.
+      mv -f "$tmp_file" "$this_script"
+      echo "  [OK] clawde CLI updated (backup: ${this_script}.bak; restart clawde to use it)"
     fi
   else
+    # Clean up any partial download so it doesn't litter the bin dir.
+    rm -f "$tmp_file"
     echo "  [WARN] clawde CLI not updated"
   fi
 }
