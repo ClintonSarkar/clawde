@@ -50,8 +50,7 @@ clawde/
 ├── docs/
 │   └── ARCHITECTURE.md        # This file
 └── .github/
-    └── workflows/
-        └── release.yml        # Build + publish releases
+    └── workflows/             # CI (lint / script checks)
 ```
 
 ## Install flow
@@ -85,10 +84,15 @@ clawde/
 
 Custom OpenCode agent modes are developed in the OpenCode fork (`ClintonSarkar/opencode`), not in this repo. clawde installs the binary from that fork's releases, so any agent modes you add there are automatically available to clawde users.
 
-## Release workflow
+## Updates
 
-GitHub Actions in this repo:
-1. Triggered on tag push (e.g., `v0.1.0`)
-2. Downloads/builds OpenCode binary for linux-x64, linux-arm64, windows-x64
-3. Publishes as GitHub release assets
-4. Users get updates via `clawde update`
+This repo does **not** publish its own release artifacts. Updates flow through
+`clawde update`, which:
+1. Self-updates the `clawde` CLI script from `raw.githubusercontent.com/.../main`
+   (hash-compared; backed up before replacing).
+2. Upgrades OpenCode via the binary's own `opencode upgrade`.
+3. Pulls the latest CCProxy binary from the `ClintonSarkar/ccproxy-api` fork's
+   GitHub releases.
+
+The OpenCode binary itself comes from the `ClintonSarkar/opencode` fork's
+releases (see External dependencies above), not from this repo.
