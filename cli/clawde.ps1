@@ -177,7 +177,7 @@ function Ensure-Python {
     $proc = Start-Process -FilePath $installerPath -ArgumentList "/quiet InstallAllUsers=0 PrependPath=1 Include_pip=1" -Wait -PassThru -NoNewWindow
     if ($proc.ExitCode -ne 0 -and $proc.ExitCode -ne 3010) {
         Write-Host "  [ERROR] Python installer failed (exit code $($proc.ExitCode))" -ForegroundColor Red
-        # 3010 means reboot required — still succeeded
+        # 3010 means reboot required - still succeeded
         if ($proc.ExitCode -eq 3010) {
             Write-Host "  [WARN] Python installed but a reboot is recommended" -ForegroundColor Yellow
         } else {
@@ -231,7 +231,7 @@ function Install-PluginCCProxy {
     Write-Host "  [INFO] Installing ccproxy-api with plugins via pipx..." -ForegroundColor Yellow
     $installOut = & pipx install "ccproxy-api[plugins-claude,plugins-codex]" 2>&1 | Out-String
     if ($LASTEXITCODE -ne 0) {
-        # May already be installed — try upgrade
+        # May already be installed - try upgrade
         & pipx upgrade ccproxy-api 2>&1 | Out-Null
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  [WARN] pipx install/upgrade failed" -ForegroundColor Yellow
@@ -382,97 +382,94 @@ function Cmd-Auth {
     Write-Host "[INFO] Starting Claude OAuth flow..." -ForegroundColor Cyan
     Write-Host "  A browser window will open for you to log in."
     Write-Host ""
-    try {
-        $ccproxy = Find-Binary "ccproxy.exe"
 
-        # Initialize CCProxy config if missing (otherwise auth provider can't be found)
-        $ccproxyConfigDir = Join-Path $env:USERPROFILE ".config\ccproxy"
-        $ccproxyConfigFile = Join-Path $ccproxyConfigDir "ccproxy.config.settings"
-        if (-not (Test-Path $ccproxyConfigFile)) {
-            Write-Host "  [INFO] Initializing CCProxy config (first-time setup)..." -ForegroundColor Yellow
-            & $ccproxy config init --output-dir $ccproxyConfigDir 2>$null | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "  [WARN] ccproxy config init had warnings (continuing)" -ForegroundColor Yellow
+    # First check if ccproxy is installed; avoid try/catch for control flow
+    $ccproxy = Find-Binary "ccproxy.exe"
+
+    # Initialize CCProxy config if missing (otherwise auth provider can't be found)
+    $ccproxyConfigDir = Join-Path $env:USERPROFILE ".config\ccproxy"
+    $ccproxyConfigFile = Join-Path $ccproxyConfigDir "ccproxy.config.settings"
+    if (-not (Test-Path $ccproxyConfigFile)) {
+        Write-Host "  [INFO] Initializing CCProxy config (first-time setup)..." -ForegroundColor Yellow
+        & $ccproxy config init --output-dir $ccproxyConfigDir 2>$null | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "  [WARN] ccproxy config init had warnings (continuing)" -ForegroundColor Yellow
+        }
+    }
+
+    # Check if any auth providers are available before attempting login
+    $providersCheck = & $ccproxy auth providers 2>&1 | Out-String
+    if ($providersCheck -match 'No OAuth providers found') {
+        Write-Host ""
+        Write-Host "  [WARN] This CCProxy binary was built without auth plugin support." -ForegroundColor Yellow
+        Write-Host "  Installing ccproxy-api with plugins for full OAuth support..." -ForegroundColor Cyan
+        Write-Host ""
+
+        # Try: pipx already available
+        $installed = $false
+        $pipx = Get-Command pipx -ErrorAction SilentlyContinue
+        if ($pipx) {
+            Write-Host "  [INFO] pipx found - installing ccproxy-api with plugins..." -ForegroundColor Cyan
+            $installed = Install-PluginCCProxy
+        }
+
+        # Try: Python available but not pipx -> install pipx first
+        if (-not $installed) {
+            $py = $null
+            if (Test-Python311 ([ref]$py)) {
+                Write-Host "  [INFO] Python found at $py - installing pipx and ccproxy-api..." -ForegroundColor Cyan
+                if (Ensure-Pipx $py) {
+                    $installed = Install-PluginCCProxy
+                }
             }
         }
 
-        # Check if any auth providers are available before attempting login
-        $providersCheck = & $ccproxy auth providers 2>&1 | Out-String
-        if ($providersCheck -match 'No OAuth providers found') {
-            Write-Host ""
-            Write-Host "  [WARN] This CCProxy binary was built without auth plugin support." -ForegroundColor Yellow
-            Write-Host "  Installing ccproxy-api with plugins for full OAuth support..." -ForegroundColor Cyan
-            Write-Host ""
-
-            # Try: pipx already available
-            $installed = $false
-            $pipx = Get-Command pipx -ErrorAction SilentlyContinue
-            if ($pipx) {
-                Write-Host "  [INFO] pipx found — installing ccproxy-api with plugins..." -ForegroundColor Cyan
-                $installed = Install-PluginCCProxy
-            }
-
-            # Try: Python available but not pipx -> install pipx first
-            if (-not $installed) {
-                $py = $null
-                if (Test-Python311 ([ref]$py)) {
-                    Write-Host "  [INFO] Python found at $py — installing pipx and ccproxy-api..." -ForegroundColor Cyan
-                    if (Ensure-Pipx $py) {
-                        $installed = Install-PluginCCProxy
-                    }
+        # Try: No Python -> offer to download and install
+        if (-not $installed) {
+            $pythonPath = Ensure-Python
+            if ($pythonPath) {
+                if (Ensure-Pipx $pythonPath) {
+                    $installed = Install-PluginCCProxy
                 }
             }
-
-            # Try: No Python -> offer to download and install
-            if (-not $installed) {
-                $pythonPath = Ensure-Python
-                if ($pythonPath) {
-                    if (Ensure-Pipx $pythonPath) {
-                        $installed = Install-PluginCCProxy
-                    }
-                }
-            }
-
-            if ($installed) {
-                Write-Host ""
-                Write-Host "  [INFO] Plugin-enabled ccproxy installed. Re-running auth..." -ForegroundColor Cyan
-                # Find the new ccproxy (via .cmd shim)
-                $ccproxy = Find-Binary "ccproxy.exe"
-                # Re-init config (new binary may have different defaults)
-                & $ccproxy config init --output-dir $ccproxyConfigDir 2>&1 | Out-Null
-                $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
-                    return
-                }
-            }
-
-            Write-Host ""
-            Write-Host "  [ERROR] Could not install auth plugins automatically." -ForegroundColor Red
-            Write-Host ""
-            Write-Host "  To fix this manually:" -ForegroundColor Cyan
-            Write-Host "    1. Install Python 3.11+ from: https://www.python.org/downloads/" -ForegroundColor White
-            Write-Host "    2. Run: python -m pip install pipx" -ForegroundColor White
-            Write-Host "    3. Run: pipx install \"ccproxy-api[plugins-claude,plugins-codex]\"" -ForegroundColor White
-            Write-Host "    4. Re-run: clawde auth" -ForegroundColor White
-            Write-Host ""
-            exit 1
         }
 
-        # Run auth login, suppressing noise (warnings come from missing config/plugins)
-        $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
-        } else {
-            # Show the last useful line from output
-            $errorLine = ($authOutput -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '\[warning' -and $_ -notmatch 'cmd_id' -and $_ -notmatch '^\[2m' -and $_ -notmatch 'config_file_missing|plugins_directories_missing|auth_provider_not_found' } | Select-Object -Last 1).Trim()
-            # Strip ANSI codes from error line
-            $errorLine = $errorLine -replace '\x1b\[[0-9;]*m', ''
-            Write-Host "`n[ERROR] Authentication failed: $errorLine" -ForegroundColor Red
-            exit 1
+        if ($installed) {
+            Write-Host ""
+            Write-Host "  [INFO] Plugin-enabled ccproxy installed. Re-running auth..." -ForegroundColor Cyan
+            # Find the new ccproxy (via .cmd shim)
+            $ccproxy = Find-Binary "ccproxy.exe"
+            # Re-init config (new binary may have different defaults)
+            & $ccproxy config init --output-dir $ccproxyConfigDir 2>&1 | Out-Null
+            $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
+                return
+            }
         }
-    } catch {
-        Write-Host "[ERROR] ccproxy not found - run 'clawde update' to install" -ForegroundColor Red
+
+        Write-Host ""
+        Write-Host "  [ERROR] Could not install auth plugins automatically." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  To fix this manually:" -ForegroundColor Cyan
+        Write-Host "    1. Install Python 3.11+ from: https://www.python.org/downloads/" -ForegroundColor White
+        Write-Host "    2. Run: python -m pip install pipx" -ForegroundColor White
+        Write-Host "    3. Run: pipx install \"ccproxy-api[plugins-claude,plugins-codex]\"" -ForegroundColor White
+        Write-Host "    4. Re-run: clawde auth" -ForegroundColor White
+        Write-Host ""
+        exit 1
+    }
+
+    # Run auth login, suppressing noise (warnings come from missing config/plugins)
+    $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
+    } else {
+        # Show the last useful line from output
+        $errorLine = ($authOutput -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '\[warning' -and $_ -notmatch 'cmd_id' -and $_ -notmatch '^\[2m' -and $_ -notmatch 'config_file_missing|plugins_directories_missing|auth_provider_not_found' } | Select-Object -Last 1).Trim()
+        # Strip ANSI codes from error line
+        $errorLine = $errorLine -replace '\x1b\[[0-9;]*m', ''
+        Write-Host "`n[ERROR] Authentication failed: $errorLine" -ForegroundColor Red
         exit 1
     }
 }
