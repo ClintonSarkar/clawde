@@ -2,11 +2,11 @@
 #   Claude Work - OpenCode bridge
 #
 # Quick install (interactive):
-#   & ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/ClintonSarkar/clawde@main/install.ps1)))
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ClintonSarkar/clawde/main/install.ps1)))
 #
 # With options:
-#   & ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/ClintonSarkar/clawde@main/install.ps1))) -Yes
-#   & ([scriptblock]::Create((irm https://cdn.jsdelivr.net/gh/ClintonSarkar/clawde@main/install.ps1))) -Uninstall
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ClintonSarkar/clawde/main/install.ps1))) -Yes
+#   & ([scriptblock]::Create((irm https://raw.githubusercontent.com/ClintonSarkar/clawde/main/install.ps1))) -Uninstall
 #
 # Or save and run:
 #   .\install.ps1 -Yes -Verbose
