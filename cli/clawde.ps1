@@ -248,27 +248,28 @@ function Install-PluginCCProxy {
 
     # Find the pipx-installed ccproxy (now that old binary is gone, PATH lookup works)
     $pipxCcproxy = Get-Command ccproxy -ErrorAction SilentlyContinue
-    if (-not $pipxCcproxy) {
+    # Normalize to a string path (Get-Command returns an object with .Source)
+    $pipxCcproxyPath = if ($pipxCcproxy) { $pipxCcproxy.Source } else { $null }
+    if (-not $pipxCcproxyPath) {
         # pipx may install to %APPDATA%\Python\Scripts or %LOCALAPPDATA%\pipx\bin
         $pipxDirs = @(
-            Join-Path $env:APPDATA "Python\Scripts",
-            Join-Path $env:LOCALAPPDATA "pipx\bin"
+            "$env:APPDATA\Python\Scripts",
+            "$env:LOCALAPPDATA\pipx\bin"
         )
         foreach ($dir in $pipxDirs) {
             $candidate = Join-Path $dir "ccproxy.exe"
-            if (Test-Path $candidate) { $pipxCcproxy = Get-Command $candidate; break }
+            if (Test-Path $candidate) { $pipxCcproxyPath = $candidate; break }
             $candidate = Join-Path $dir "ccproxy.cmd"
-            if (Test-Path $candidate) { $pipxCcproxy = Get-Command $candidate; break }
+            if (Test-Path $candidate) { $pipxCcproxyPath = $candidate; break }
         }
     }
-    if (-not $pipxCcproxy) {
+    if (-not $pipxCcproxyPath) {
         Write-Host "  [WARN] pipx install succeeded but ccproxy not found on PATH" -ForegroundColor Yellow
         return $false
     }
 
     # Create .cmd shim pointing to the pipx entry point
-    $shimPath = $pipxCcproxy.Source
-    $shimContent = "@echo off`r`n`"$shimPath`" %*`r`n"
+    $shimContent = "@echo off`r`n`"$pipxCcproxyPath`" %*`r`n"
     Set-Content -Path $shimCmd -Value $shimContent -Encoding ASCII -Force
 
     Write-Host "  [OK] ccproxy-api installed via pipx" -ForegroundColor Green
