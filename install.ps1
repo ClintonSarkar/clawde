@@ -54,8 +54,7 @@ $Script:ExistingOpenCodePath = $null
 $Script:AuthPending          = $false
 
 # Progress bar state
-$Script:ProgressCurrent      = 0
-$Script:ProgressTotal        = 6
+# (progress tracking removed for cleaner UI)
 
 # ====================================================================
 # Logging
@@ -84,41 +83,22 @@ function Show-Progress {
         [int]$Total,
         [string]$Label
     )
-    $Script:ProgressCurrent = $Step
-    $Script:ProgressTotal = $Total
-    Write-Host "  > $Label... " -NoNewline
-    Draw-ProgressBar $false
     Write-Host ""
-}
-
-function Draw-ProgressBar {
-    param([switch]$AfterStep)
-    $filledStep = if ($AfterStep) { $Script:ProgressCurrent } else { $Script:ProgressCurrent - 1 }
-    $percent = [math]::Max(0, [math]::Min(100, [math]::Round($filledStep / $Script:ProgressTotal * 100)))
-    $barWidth = 30
-    $filled = [math]::Max(0, [math]::Round($barWidth * $filledStep / $Script:ProgressTotal))
-    $empty = $barWidth - $filled
-    
-    $bar = "[" + ("#" * $filled) + ("." * $empty) + "]"
-    Write-Host "$bar $percent%" -NoNewline
+    Write-Host ("[{0:HH:mm:ss}] Step {1}/{2}: {3}" -f (Get-Date), $Step, $Total, $Label) -ForegroundColor Cyan
 }
 
 function Set-StepDone {
     param(
         [string]$Summary
     )
-    Draw-ProgressBar -AfterStep
-    Write-Host ""
-    Write-Host "  OK $Summary"
+    Write-Host "  [OK] $Summary" -ForegroundColor Green
 }
 
 function Set-StepFailed {
     param(
         [string]$Summary
     )
-    Draw-ProgressBar -AfterStep
-    Write-Host ""
-    Write-Host "  FAIL $Summary"
+    Write-Host "  [FAIL] $Summary" -ForegroundColor Red
 }
 
 # ====================================================================
