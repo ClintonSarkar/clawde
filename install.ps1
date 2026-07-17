@@ -751,20 +751,20 @@ function Install-CCProxy {
         $pipxOk = $false
         $py = $null
         if (Test-PipxAvailable) {
-            Write-Info "pipx found — installing ccproxy-api with plugins..."
+            Write-Info "pipx found - installing ccproxy-api with plugins..."
             $pipxOk = [bool](Install-CCProxyViaPipx)
         }
 
         if (-not $pipxOk) {
             # Try Python without pipx
             if (Test-Python311 ([ref]$py)) {
-                Write-Info "Python found — installing pipx and ccproxy-api..."
+                Write-Info "Python found - installing pipx and ccproxy-api..."
                 if (Install-Pipx $py) {
                     $pipxOk = [bool](Install-CCProxyViaPipx)
                 }
             } else {
                 # Offer to install Python
-                Write-Info "Python 3.11+ not found — offering to install it for OAuth support..."
+                Write-Info "Python 3.11+ not found - offering to install it for OAuth support..."
                 $pyPath = Install-Python311
                 if ($pyPath) {
                     if (Install-Pipx $pyPath) {
@@ -780,7 +780,7 @@ function Install-CCProxy {
         }
 
         # If we get here, still download the latest binary (it can serve even without auth plugins).
-        # The ccproxy.exe binary itself works fine — only the OAuth plugin is missing.
+        # The ccproxy.exe binary itself works fine - only the OAuth plugin is missing.
         Write-Warn "Continuing to download latest ccproxy.exe binary (auth plugins only needed for 'clawde auth')"
         Write-Warn "To get auth support later, install pipx and run: pipx install ccproxy-api[plugins-claude,plugins-codex]"
         # Fall through to re-download the latest binary
