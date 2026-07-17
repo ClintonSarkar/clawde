@@ -378,20 +378,96 @@ function Cmd-Config($edit) {
     }
 }
 
+function Test-CCProxyBinary {
+    param([string]$BinaryPath)
+    # Returns $true if the binary is executable and responds to --version
+    try {
+        $null = & $BinaryPath --version 2>&1
+        return ($LASTEXITCODE -eq 0)
+    } catch {
+        return $false
+    }
+}
+
+function Repair-CCProxy {
+    # Try to install or repair ccproxy binary (with plugins if possible).
+    # Returns $true on success.
+    Write-Host ""
+    Write-Host "  [INFO] Attempting to install CCProxy..." -ForegroundColor Cyan
+
+    # 1) Try pipx immediately
+    $pipx = Get-Command pipx -ErrorAction SilentlyContinue
+    if ($pipx) {
+        if (Install-PluginCCProxy) {
+            return $true
+        }
+    }
+
+    # 2) Try Python + pipx
+    $py = $null
+    if (Test-Python311 ([ref]$py)) {
+        Write-Host "  [INFO] Python found at $py - installing pipx..." -ForegroundColor Cyan
+        if (Ensure-Pipx $py) {
+            if (Install-PluginCCProxy) {
+                return $true
+            }
+        }
+    }
+
+    # 3) Offer to download Python
+    $pythonPath = Ensure-Python
+    if ($pythonPath) {
+        if (Ensure-Pipx $pythonPath) {
+            if (Install-PluginCCProxy) {
+                return $true
+            }
+        }
+    }
+
+    return $false
+}
+
 function Cmd-Auth {
     Write-Host "[INFO] Starting Claude OAuth flow..." -ForegroundColor Cyan
     Write-Host "  A browser window will open for you to log in."
     Write-Host ""
 
-    # First check if ccproxy is installed; avoid try/catch for control flow
+    # Find the binary and verify it works
     $ccproxy = Find-Binary "ccproxy.exe"
+
+    if (-not (Test-CCProxyBinary $ccproxy)) {
+        Write-Host "  [WARN] ccproxy binary at '$ccproxy' is not responding." -ForegroundColor Yellow
+
+        if ($ccproxy.EndsWith('.cmd')) {
+            Write-Host "    (it is a .cmd shim - the target executable may be missing)" -ForegroundColor DarkGray
+            # Show what the shim points to
+            $shimContent = Get-Content $ccproxy -Raw
+            Write-Host "    Shim content: $shimContent" -ForegroundColor DarkGray
+        }
+
+        # Try to repair
+        $fixed = Repair-CCProxy
+        if (-not $fixed) {
+            Write-Host ""
+            Write-Host "  [ERROR] Could not find or install ccproxy." -ForegroundColor Red
+            Write-Host "  Try running the installer first:" -ForegroundColor Cyan
+            Write-Host "    irm https://raw.githubusercontent.com/ClintonSarkar/clawde/main/install.ps1 | iex" -ForegroundColor White
+            Write-Host ""
+            exit 1
+        }
+
+        # Re-find now that repair ran
+        $ccproxy = Find-Binary "ccproxy.exe"
+        Write-Host "  [OK] CCProxy installed/repaired" -ForegroundColor Green
+        Write-Host ""
+    }
 
     # Initialize CCProxy config if missing (otherwise auth provider can't be found)
     $ccproxyConfigDir = Join-Path $env:USERPROFILE ".config\ccproxy"
     $ccproxyConfigFile = Join-Path $ccproxyConfigDir "ccproxy.config.settings"
     if (-not (Test-Path $ccproxyConfigFile)) {
         Write-Host "  [INFO] Initializing CCProxy config (first-time setup)..." -ForegroundColor Yellow
-        & $ccproxy config init --output-dir $ccproxyConfigDir 2>$null | Out-Null
+        $initOutput = & $ccproxy config init --output-dir $ccproxyConfigDir 2>&1 | Out-String
         if ($LASTEXITCODE -ne 0) {
             Write-Host "  [WARN] ccproxy config init had warnings (continuing)" -ForegroundColor Yellow
         }
@@ -405,41 +481,12 @@ function Cmd-Auth {
         Write-Host "  Installing ccproxy-api with plugins for full OAuth support..." -ForegroundColor Cyan
         Write-Host ""
 
-        # Try: pipx already available
-        $installed = $false
-        $pipx = Get-Command pipx -ErrorAction SilentlyContinue
-        if ($pipx) {
-            Write-Host "  [INFO] pipx found - installing ccproxy-api with plugins..." -ForegroundColor Cyan
-            $installed = Install-PluginCCProxy
-        }
-
-        # Try: Python available but not pipx -> install pipx first
-        if (-not $installed) {
-            $py = $null
-            if (Test-Python311 ([ref]$py)) {
-                Write-Host "  [INFO] Python found at $py - installing pipx and ccproxy-api..." -ForegroundColor Cyan
-                if (Ensure-Pipx $py) {
-                    $installed = Install-PluginCCProxy
-                }
-            }
-        }
-
-        # Try: No Python -> offer to download and install
-        if (-not $installed) {
-            $pythonPath = Ensure-Python
-            if ($pythonPath) {
-                if (Ensure-Pipx $pythonPath) {
-                    $installed = Install-PluginCCProxy
-                }
-            }
-        }
+        $installed = Repair-CCProxy
 
         if ($installed) {
             Write-Host ""
             Write-Host "  [INFO] Plugin-enabled ccproxy installed. Re-running auth..." -ForegroundColor Cyan
-            # Find the new ccproxy (via .cmd shim)
             $ccproxy = Find-Binary "ccproxy.exe"
-            # Re-init config (new binary may have different defaults)
             & $ccproxy config init --output-dir $ccproxyConfigDir 2>&1 | Out-Null
             $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
             if ($LASTEXITCODE -eq 0) {
@@ -460,16 +507,22 @@ function Cmd-Auth {
         exit 1
     }
 
-    # Run auth login, suppressing noise (warnings come from missing config/plugins)
+    # Run auth login
+    Write-Host "  Opening browser for authentication..." -ForegroundColor Cyan
     $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
     if ($LASTEXITCODE -eq 0) {
         Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
     } else {
-        # Show the last useful line from output
-        $errorLine = ($authOutput -split "`n" | Where-Object { $_.Trim() -and $_ -notmatch '\[warning' -and $_ -notmatch 'cmd_id' -and $_ -notmatch '^\[2m' -and $_ -notmatch 'config_file_missing|plugins_directories_missing|auth_provider_not_found' } | Select-Object -Last 1).Trim()
-        # Strip ANSI codes from error line
-        $errorLine = $errorLine -replace '\x1b\[[0-9;]*m', ''
-        Write-Host "`n[ERROR] Authentication failed: $errorLine" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "  [ERROR] Authentication failed. Raw output:" -ForegroundColor Red
+        Write-Host ""
+        $authOutput.Trim() -split "`n" | ForEach-Object {
+            $line = $_.Trim()
+            if ($line) {
+                Write-Host "    | $line" -ForegroundColor DarkGray
+            }
+        }
+        Write-Host ""
         exit 1
     }
 }
