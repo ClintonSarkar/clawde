@@ -168,7 +168,7 @@ _redraw_bar() {
 
   for ((i=0; i<empty; i++)); do bar+="Γûæ"; done
 
-  printf "\r  Γû╕ %s... [%s] %d%%" "$PROGRESS_LABEL" "$bar" "$percent"
+  printf "  Γû╕ %s... [%s] %d%%\n" "$PROGRESS_LABEL" "$bar" "$percent"
 
 }
 

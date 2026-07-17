@@ -86,9 +86,9 @@ function Show-Progress {
     )
     $Script:ProgressCurrent = $Step
     $Script:ProgressTotal = $Total
-    Write-Host "`r$(' ' * 80)`r" -NoNewline
     Write-Host "  Γû╕ $Label... " -NoNewline
     Draw-ProgressBar $false
+    Write-Host ""
 }
 
 function Draw-ProgressBar {
@@ -107,12 +107,8 @@ function Set-StepDone {
     param(
         [string]$Summary
     )
-    # Clear the current progress line
-    Write-Host "`r$(' ' * 80)`r" -NoNewline
-    # Draw bar showing completed step
     Draw-ProgressBar -AfterStep
     Write-Host ""
-    # Write permanent completion line
     Write-Host "  Γ£ô $Summary"
 }
 
@@ -120,12 +116,8 @@ function Set-StepFailed {
     param(
         [string]$Summary
     )
-    # Clear the current progress line
-    Write-Host "`r$(' ' * 80)`r" -NoNewline
-    # Draw bar showing step as attempted
     Draw-ProgressBar -AfterStep
     Write-Host ""
-    # Write permanent failure line
     Write-Host "  Γ£ù $Summary"
 }
 
