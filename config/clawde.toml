@@ -1,31 +1,37 @@
 # clawde configuration file
 # Generated during install — edit with `clawde config`
+#
+# Only the keys marked [active] below change clawde's behaviour today. Keys
+# marked [reserved] are written for forward compatibility but are not read yet;
+# editing them has no effect until a release wires them up.
 
 [proxy]
-# CCProxy settings
+# [active] CCProxy listen address. Read by `clawde start` / `status`.
 port = 8080
 host = "127.0.0.1"
 
 [claude]
-# Authentication method: "oauth" or "cli_token"
+# [reserved] Authentication is always the browser OAuth flow via `clawde auth`
+# today. auth_method / cli_token_path are not consumed yet.
 auth_method = "oauth"
-# Path to existing Claude CLI token (used when auth_method = "cli_token")
 cli_token_path = ""
 
 [opencode]
-# OpenCode provider config
-provider_name = "clawde"
-# Auto-start services on boot
+# [active] auto_start controls whether the installer sets up boot/login
+# auto-start of the proxy (systemd user service / scheduled task).
 auto_start = false
+# NOTE: the OpenCode provider itself (id "ccproxy-claude", baseURL, apiKey) is
+# defined in opencode.json by the installer, not here — that file is the single
+# source of truth for provider wiring.
 
 [models]
-# Which models to expose from Claude Work plan
-# "all" = discover dynamically, or specify a list
+# [reserved] Model exposure is currently fixed by the provider entry in
+# opencode.json; this key is not consumed yet.
 expose = "all"
 
 [logging]
-# Log directory (defaults to platform-specific)
-# Linux/WSL: ~/.local/share/clawde/logs
-# Windows: %APPDATA%\clawde\logs
+# [reserved] Logs always go to the platform log dir (Linux/WSL:
+# ~/.local/share/clawde/logs, Windows: %LOCALAPPDATA%\clawde\logs). level /
+# rotation_days are not consumed yet.
 level = "info"
 rotation_days = 7
