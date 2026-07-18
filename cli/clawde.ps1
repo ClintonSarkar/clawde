@@ -334,8 +334,9 @@ function Cmd-Start($extraArgs) {
     } else {
         Write-Host "[INFO] Starting OpenCode..." -ForegroundColor Cyan
         $opencodeExe = Find-Binary "opencode.exe"
-        $env:OPENCODE_PROVIDER_CLAWDE_BASE_URL = "http://${host_}:${port}/v1"
-        $env:OPENCODE_PROVIDER_CLAWDE_API_KEY = "clawde"
+        # The ccproxy-claude provider (baseURL + apiKey) is defined
+        # authoritatively in opencode.json by the installer; OpenCode reads it
+        # from there. Don't export a second, divergent provider definition here.
         # Interactive foreground - user interacts with this
         Write-Host "[INFO] Attaching to OpenCode console..." -ForegroundColor Cyan
         Write-Host "[INFO] Use /exit to stop OpenCode and return to shell`n" -ForegroundColor Cyan
@@ -344,20 +345,49 @@ function Cmd-Start($extraArgs) {
     }
 }
 
+# Kill a process and its entire descendant tree. CCProxy launched through the
+# pipx .cmd shim is cmd.exe -> ccproxy launcher -> python.exe (the real server),
+# so stopping only the recorded PID orphans the server. Recurse the FULL tree,
+# children before parents, so no descendant is left holding the port.
+function Stop-ProcessTree($procId) {
+    try {
+        $children = Get-CimInstance Win32_Process -Filter "ParentProcessId=$procId" -ErrorAction SilentlyContinue
+        foreach ($c in $children) {
+            Stop-ProcessTree $c.ProcessId
+        }
+    } catch {}
+    Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+}
+
 function Cmd-Stop {
     foreach ($name in @("opencode", "proxy")) {
         $procId = Get-Pid-File $name
         if ($procId -and (Test-ProcessRunning $procId)) {
-            try {
-                Stop-Process -Id $procId -Force -ErrorAction Stop
+            Stop-ProcessTree $procId
+            # Stop-ProcessTree swallows errors, so confirm the kill actually
+            # took rather than printing an unconditional success.
+            if (Test-ProcessRunning $procId) {
+                Write-Host "[ERROR] Failed to stop $name (PID $procId still running)" -ForegroundColor Red
+            } else {
                 Write-Host "[OK] $name stopped (was PID $procId)" -ForegroundColor Green
-            } catch {
-                Write-Host "[ERROR] Failed to stop ${name}: $_" -ForegroundColor Red
             }
         } else {
             Write-Host "[OK] $name not running" -ForegroundColor Green
         }
         Remove-Pid-File $name
+    }
+
+    # Defensive: if the PID file was stale but a ccproxy is still running
+    # (e.g. orphaned by a previous shim launch), stop its whole tree by name too
+    # - the named process is the launcher; its python.exe child is the server.
+    $stray = Get-Process -Name ccproxy -ErrorAction SilentlyContinue
+    foreach ($p in $stray) {
+        Stop-ProcessTree $p.Id
+        if (Test-ProcessRunning $p.Id) {
+            Write-Host "[WARN] stray ccproxy (PID $($p.Id)) still running" -ForegroundColor Yellow
+        } else {
+            Write-Host "[OK] stopped stray ccproxy (PID $($p.Id))" -ForegroundColor Green
+        }
     }
 }
 
@@ -379,12 +409,15 @@ function Cmd-Status {
         Write-Host "[FAIL] CCProxy   not running" -ForegroundColor Red
     }
 
-    # OpenCode
-    $opencodePid = Get-Pid-File "opencode"
-    if ($opencodePid -and (Test-ProcessRunning $opencodePid)) {
-        Write-Host "[OK]   OpenCode  running (PID $opencodePid)" -ForegroundColor Green
+    # OpenCode runs in the foreground of `clawde start` (interactive console),
+    # so there is no daemon PID to health-check here. Report by live process
+    # presence instead of a stale PID file, and never as a red [FAIL] - its
+    # absence just means no interactive session is currently attached.
+    $opencodeProc = Get-Process -Name opencode -ErrorAction SilentlyContinue
+    if ($opencodeProc) {
+        Write-Host "[OK]   OpenCode  running (PID $($opencodeProc[0].Id))" -ForegroundColor Green
     } else {
-        Write-Host "[FAIL] OpenCode  not running" -ForegroundColor Red
+        Write-Host "[INFO] OpenCode  not attached (starts in the foreground via 'clawde start')" -ForegroundColor Cyan
     }
 }
 
