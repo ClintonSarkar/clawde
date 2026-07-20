@@ -222,6 +222,52 @@ function Ensure-Pipx($pythonExe) {
     return $false
 }
 
+# Resolve the path to the pipx-installed ccproxy.exe by asking pipx directly,
+# NOT by PATH lookup. PATH lookup is unreliable here for two reasons:
+#   1. The clawde bin dir is on PATH and may still hold a (broken) ccproxy.exe,
+#      so Get-Command would resolve to that instead of the pipx one.
+#   2. pipx's bin dir varies by pipx/Python version (%USERPROFILE%\.local\bin on
+#      newer pipx, %APPDATA%\Python\Scripts or %LOCALAPPDATA%\pipx\bin on older).
+# $ExcludeDir (the clawde bin dir) is never returned, so the caller can safely
+# delete its own bin-dir binary without the resolver pointing back at it.
+function Resolve-PipxCcproxy {
+    param([string]$ExcludeDir)
+
+    # Canonicalize for prefix comparison: backslashes only, single trailing
+    # separator. Without this a forward-slash PATH entry (C:/.../bin\ccproxy.exe)
+    # slips past a backslash $ExcludeDir and the bin-dir binary could be returned.
+    $exDir = if ($ExcludeDir) { $ExcludeDir.Replace('/', '\').TrimEnd('\') + '\' } else { $null }
+
+    $candidates = @()
+
+    # 1) Authoritative: pipx tells us its bin dir.
+    try {
+        $binDir = (& pipx environment --value PIPX_BIN_DIR 2>$null | Out-String).Trim()
+        if ($binDir) { $candidates += (Join-Path $binDir "ccproxy.exe") }
+    } catch {}
+
+    # 2) Known pipx bin locations across versions.
+    $candidates += @(
+        (Join-Path $env:USERPROFILE ".local\bin\ccproxy.exe")
+        (Join-Path $env:APPDATA "Python\Scripts\ccproxy.exe")
+        (Join-Path $env:LOCALAPPDATA "pipx\bin\ccproxy.exe")
+    )
+
+    # 3) PATH lookup LAST, -All so a pipx entry further down PATH survives even
+    #    when the (excluded) bin-dir copy is the first match.
+    foreach ($cmd in @(Get-Command ccproxy -All -ErrorAction SilentlyContinue)) {
+        if ($cmd -and $cmd.Source) { $candidates += $cmd.Source }
+    }
+
+    foreach ($c in $candidates) {
+        if (-not $c) { continue }
+        $cn = $c.Replace('/', '\')
+        if ($exDir -and $cn.StartsWith($exDir, [System.StringComparison]::OrdinalIgnoreCase)) { continue }
+        if (Test-Path $c) { return $c }
+    }
+    return $null
+}
+
 function Install-PluginCCProxy {
     # Install ccproxy-api with plugins via pipx, then wire a .cmd shim into clawde\bin.
     # Returns $true on success.
@@ -240,39 +286,29 @@ function Install-PluginCCProxy {
         }
     }
 
-    # Remove old standalone binary FIRST so Get-Command finds the pipx entry point
     $ccproxyExe = Join-Path $BinDir "ccproxy.exe"
     $shimCmd = Join-Path $BinDir "ccproxy.cmd"
-    if (Test-Path $ccproxyExe) { Remove-Item $ccproxyExe -Force -ErrorAction SilentlyContinue }
-    if (Test-Path $shimCmd)    { Remove-Item $shimCmd -Force -ErrorAction SilentlyContinue }
 
-    # Find the pipx-installed ccproxy (now that old binary is gone, PATH lookup works)
-    $pipxCcproxy = Get-Command ccproxy -ErrorAction SilentlyContinue
-    # Normalize to a string path (Get-Command returns an object with .Source)
-    $pipxCcproxyPath = if ($pipxCcproxy) { $pipxCcproxy.Source } else { $null }
+    # Resolve the pipx target BEFORE deleting anything (matching install.ps1). The
+    # resolver excludes $BinDir, so deleting after is safe - but resolving first
+    # means a resolver failure leaves the existing bin-dir artifacts (incl. the
+    # broken .cmd that Cmd-Auth prints as a diagnostic) intact for the user.
+    $pipxCcproxyPath = Resolve-PipxCcproxy -ExcludeDir $BinDir
     if (-not $pipxCcproxyPath) {
-        # pipx may install to %APPDATA%\Python\Scripts or %LOCALAPPDATA%\pipx\bin
-        $pipxDirs = @(
-            "$env:APPDATA\Python\Scripts",
-            "$env:LOCALAPPDATA\pipx\bin"
-        )
-        foreach ($dir in $pipxDirs) {
-            $candidate = Join-Path $dir "ccproxy.exe"
-            if (Test-Path $candidate) { $pipxCcproxyPath = $candidate; break }
-            $candidate = Join-Path $dir "ccproxy.cmd"
-            if (Test-Path $candidate) { $pipxCcproxyPath = $candidate; break }
-        }
-    }
-    if (-not $pipxCcproxyPath) {
-        Write-Host "  [WARN] pipx install succeeded but ccproxy not found on PATH" -ForegroundColor Yellow
+        Write-Host "  [WARN] pipx install succeeded but the ccproxy binary could not be located" -ForegroundColor Yellow
+        Write-Host "  [WARN] check 'pipx environment --value PIPX_BIN_DIR' and 'pipx list'" -ForegroundColor Yellow
         return $false
     }
+
+    # Now remove the old bin-dir binary/shim and write the new shim.
+    if (Test-Path $ccproxyExe) { Remove-Item $ccproxyExe -Force -ErrorAction SilentlyContinue }
+    if (Test-Path $shimCmd)    { Remove-Item $shimCmd -Force -ErrorAction SilentlyContinue }
 
     # Create .cmd shim pointing to the pipx entry point
     $shimContent = "@echo off`r`n`"$pipxCcproxyPath`" %*`r`n"
     Set-Content -Path $shimCmd -Value $shimContent -Encoding ASCII -Force
 
-    Write-Host "  [OK] ccproxy-api installed via pipx" -ForegroundColor Green
+    Write-Host "  [OK] ccproxy-api installed via pipx ($pipxCcproxyPath)" -ForegroundColor Green
     return $true
 }
 
