@@ -526,25 +526,64 @@ function Repair-CCProxy {
 
 function Invoke-CCProxyWithTimeout {
     param([string]$BinaryPath, [string[]]$ArgumentList, [int]$TimeoutSeconds = 10)
+    # Separate stdout/stderr targets: Start-Process rejects the SAME file for
+    # both -RedirectStandardOutput and -RedirectStandardError.
     $tmpOut = Join-Path $env:TEMP "ccproxy_out_$PID.txt"
+    $tmpErr = Join-Path $env:TEMP "ccproxy_err_$PID.txt"
+    # Force UTF-8 on the child so it doesn't crash printing non-ASCII (e.g. its
+    # "checkmark" success glyph) under a legacy Windows code page. Restore after.
+    $prevIoEnc = $env:PYTHONIOENCODING; $prevUtf8 = $env:PYTHONUTF8
+    $env:PYTHONIOENCODING = "utf-8"; $env:PYTHONUTF8 = "1"
+    $p = $null
     try {
-        $p = Start-Process -FilePath $BinaryPath -ArgumentList $ArgumentList -NoNewWindow -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpOut
+        $p = Start-Process -FilePath $BinaryPath -ArgumentList $ArgumentList -NoNewWindow -PassThru -RedirectStandardOutput $tmpOut -RedirectStandardError $tmpErr
         $p | Wait-Process -Timeout $TimeoutSeconds -ErrorAction SilentlyContinue | Out-Null
         if (-not $p.HasExited) {
-            $p.Kill()
+            # Guard the kill: the child may exit between the check and Kill(),
+            # which would otherwise throw into the catch and mislabel a genuine
+            # timeout as a launch failure.
+            try { $p.Kill() } catch {}
             return $null, $null, $true  # timed out
         }
-        $output = Get-Content $tmpOut -Raw
+        # Combine both streams so callers see everything the child emitted.
+        $output = ((Get-Content $tmpOut -Raw -ErrorAction SilentlyContinue) + (Get-Content $tmpErr -Raw -ErrorAction SilentlyContinue))
         return $output, $p.ExitCode, $false  # output, exitcode, timedout
+    } catch {
+        # Start-Process threw (e.g. bad binary path) - NOT a timeout. Guard the
+        # kill against a null $p, and return the error as output with exitcode 1
+        # + timedout=$false so callers surface a real error, not a false timeout.
+        if ($p -and -not $p.HasExited) { $p.Kill() }
+        return "ccproxy launch failed: $($_.Exception.Message)", 1, $false
     } finally {
-        Remove-Item $tmpOut -Force -ErrorAction SilentlyContinue
+        $env:PYTHONIOENCODING = $prevIoEnc; $env:PYTHONUTF8 = $prevUtf8
+        Remove-Item $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
     }
 }
 
-function Cmd-Auth {
+# True if ccproxy's `auth login` output shows authentication succeeded, even if
+# the process then exited non-zero. On success ccproxy prints
+# "[green]checkmark[/green] Authentication successful!" and can crash ON THAT
+# PRINT under a legacy Windows code page (UnicodeEncodeError on the glyph),
+# exiting non-zero AFTER a fully successful login - so the exit code alone is
+# unreliable. The UTF-8 env fix prevents the crash; this is the belt-and-braces
+# fallback for any post-print non-zero exit. Only the `login`-emitted string is
+# matched here (the "valid credentials" phrasing belongs to `auth status`).
+function Test-AuthSucceeded {
+    param([int]$ExitCode, [string]$Output)
+    if ($ExitCode -eq 0) { return $true }
+    if ($Output -match 'Authentication successful') { return $true }
+    return $false
+}
+
+function Cmd-Auth($Force) {
     Write-Host "[INFO] Starting Claude OAuth flow..." -ForegroundColor Cyan
     Write-Host "  A browser window will open for you to log in."
     Write-Host ""
+
+    # Force UTF-8 for every ccproxy child spawned below, so it can print its
+    # non-ASCII success message without crashing on a legacy Windows code page.
+    $env:PYTHONIOENCODING = "utf-8"
+    $env:PYTHONUTF8 = "1"
 
     # Find the binary and verify it works
     $ccproxy = Find-Binary "ccproxy.exe"
@@ -586,6 +625,7 @@ function Cmd-Auth {
             Write-Host "  [WARN] ccproxy config init timed out (continuing with defaults)" -ForegroundColor Yellow
         } elseif ($initCode -ne 0) {
             Write-Host "  [WARN] ccproxy config init had warnings (continuing)" -ForegroundColor Yellow
+            if ($initOut) { Write-Host ("    " + $initOut.Trim()) -ForegroundColor DarkGray }
         }
     }
 
@@ -606,7 +646,7 @@ function Cmd-Auth {
             # Config init with timeout
             $initOut2, $initCode2, $initTimedOut2 = Invoke-CCProxyWithTimeout -BinaryPath $ccproxy -ArgumentList @("config", "init", "--output-dir", $ccproxyConfigDir) -TimeoutSeconds 10
             $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
-            if ($LASTEXITCODE -eq 0) {
+            if (Test-AuthSucceeded $LASTEXITCODE $authOutput) {
                 Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
                 return
             }
@@ -624,10 +664,26 @@ function Cmd-Auth {
         exit 1
     }
 
+    # Already authenticated? Ask ccproxy's status before pushing a fresh login,
+    # so a user with valid credentials isn't sent through a needless OAuth
+    # round-trip. `auth status` prints "Authenticated with valid credentials"
+    # when a usable token exists (this is the command that emits that phrase).
+    # Skipped under -Force/--relogin so the user can still re-auth deliberately
+    # (switch accounts, or replace credentials ccproxy reports as valid but that
+    # are actually revoked - status has no revocation check).
+    if (-not $Force) {
+        $statusOutput = & $ccproxy auth status claude 2>&1 | Out-String
+        if ($statusOutput -match 'Authenticated with valid credentials') {
+            Write-Host "`n[OK] Already authenticated - no login needed" -ForegroundColor Green
+            Write-Host "  To re-authenticate anyway (e.g. switch accounts): clawde auth --force" -ForegroundColor DarkGray
+            return
+        }
+    }
+
     # Run auth login
     Write-Host "  Opening browser for authentication..." -ForegroundColor Cyan
     $authOutput = & $ccproxy auth login claude 2>&1 | Out-String
-    if ($LASTEXITCODE -eq 0) {
+    if (Test-AuthSucceeded $LASTEXITCODE $authOutput) {
         Write-Host "`n[OK] Authentication complete" -ForegroundColor Green
     } else {
         Write-Host ""
@@ -837,7 +893,7 @@ if (-not $command) {
     Write-Host "  stop     Stop both services"
     Write-Host "  status   Check health of both services"
     Write-Host "  config   View or edit configuration"
-    Write-Host "  auth     Re-authenticate Claude"
+    Write-Host "  auth     Log in to Claude (skips if already authenticated; use --force to re-auth)"
     Write-Host "  update   Update to latest versions"
     Write-Host "  logs     Tail logs (proxy | opencode)"
     Write-Host ""
@@ -862,7 +918,10 @@ switch ($command) {
         $edit = $args.Contains("--edit") -or $args.Contains("-e")
         Cmd-Config $edit
     }
-    "auth" { Cmd-Auth }
+    "auth" {
+        $force = $args.Contains("--force") -or $args.Contains("--relogin")
+        Cmd-Auth $force
+    }
     "update" { Cmd-Update }
     "logs" {
         $service = $null
